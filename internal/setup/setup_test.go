@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/ashfaqc137/ownci/internal/config"
@@ -341,6 +342,35 @@ func TestSecondSetupRefusedThenForce(t *testing.T) {
 		t.Errorf("createdAt changed: %v → %v", first.CreatedAt, again.CreatedAt)
 	}
 	e.assertNoSecrets()
+}
+
+func TestForceRefusedWhileRunnerRuns(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	if err := e.run(Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the runner's lock like a live supervisor.
+	lock, err := os.OpenFile(e.deps.Paths.LockFile("ownci-box"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	before := e.reqs.Load()
+	err = e.run(Options{Force: true})
+	wantErr(t, err, "is running", "ownci stop")
+	if e.reqs.Load() != before {
+		t.Error("refusal must happen before any network call")
+	}
+	// Once the lock is gone, force works again.
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run(Options{Force: true}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDifferentRepoOrNameRefusedEvenWithForce(t *testing.T) {

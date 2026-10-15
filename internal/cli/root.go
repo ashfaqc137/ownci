@@ -77,6 +77,7 @@ func newRoot() (*cobra.Command, *rootFlags) {
 		newStartCmd(),
 		newStopCmd(),
 		newStatusCmd(),
+		newSuperviseCmd(),
 		newLogsCmd(),
 		newUninstallCmd(),
 	)

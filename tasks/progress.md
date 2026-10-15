@@ -13,7 +13,7 @@
 | t04 | Runner download, verify, extract, fake runner | ✅ | – | – | |
 | t05 | GitHub client, `tools/fakegh` | ✅ | – | – | |
 | t06 | `setup` | ✅ | – | – | |
-| t07 | `start` / `stop` / `status` | – | – | – | |
+| t07 | `start` / `stop` / `status` | ✅ | – | – | |
 | t08 | Isolation enforcement + cleanup hook | – | – | – | |
 | t09 | `uninstall` / `logs` | – | – | – | |
 | t10 | Real E2E, docs, release | – | – | – | |
@@ -26,8 +26,10 @@ Post-release ideas are collected in [`future.md`](future.md).
 
 <!-- Anything a later task must pick up. Format: - [ ] (tNN → tMM) description. Tick when resolved and name the resolving task. -->
 - [x] (t03 → t06) Enable Docker Desktop WSL integration for this distro before t06 (setup/start require Docker) — resolved: the real Docker check passed during t06 verification (2026-10-15)
-- [ ] (t06 → t07) `setup --force` must refuse while the runner is running (lock check; `// t07:` TODO in `internal/setup/setup.go` `detectExisting`)
+- [x] (t06 → t07) `setup --force` must refuse while the runner is running — resolved in t07 (`detectExisting` checks `supervisor.IsRunning`)
 - [ ] (t06 → t08) Implement `installIsolation` in `internal/setup/setup.go` (step 10: write `.env` and the cleanup hook); until then a set-up runner does not enforce D1
+- [ ] (t07 → t08) Fill `beforeLaunch` in `internal/cli/supervise.go` (re-assert `.env`, run cleanup) and add an isolation section to `statusReport`/`renderStatus` in `internal/cli/status.go`
+- [ ] (t07 → t09) Use `supervisor.IsRunning` / `supervisor.Stop` (`ErrNotRunning`) in uninstall; `logs` can tail `logs/runner-<name>.log` and `logs/supervisor-<name>.log`
 - [ ] (t08 → t10) Document the remaining isolation gaps (network access, sibling containers via `services:`/`docker://`, shared Docker daemon, root in the job container) in the README
 - [ ] (t08 → t10) Verify on real GitHub: the job-completed hook timing relative to the job-container stop
 - [ ] (t08 → t10) Verify on real GitHub: wiping `_work` (except `_temp`, `_PipelineMapping`) doesn't break the runner

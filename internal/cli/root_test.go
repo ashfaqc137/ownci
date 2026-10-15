@@ -57,7 +57,7 @@ func TestVersionJSON(t *testing.T) {
 }
 
 func TestStubsNotImplemented(t *testing.T) {
-	for _, name := range []string{"start", "stop", "status", "logs", "uninstall"} {
+	for _, name := range []string{"logs", "uninstall"} {
 		t.Run(name, func(t *testing.T) {
 			_, stderr, code := runCLI(t, name)
 			if code != 2 {

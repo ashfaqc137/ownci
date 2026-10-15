@@ -20,6 +20,7 @@ import (
 	"github.com/ashfaqc137/ownci/internal/github"
 	"github.com/ashfaqc137/ownci/internal/platform"
 	"github.com/ashfaqc137/ownci/internal/runner"
+	"github.com/ashfaqc137/ownci/internal/supervisor"
 )
 
 const (
@@ -277,7 +278,23 @@ func (r *run) detectExisting() (prev *config.RunnerConfig, registered bool, err 
 			Hint: "Run 'ownci status', or 'ownci uninstall --unregister' and then set up again, or pass --force to re-register in place.",
 		}
 	}
-	// t07: when the runner can be running (lock file), --force must refuse here.
+	// Re-registering or replacing files under a live runner would corrupt it.
+	if o.Force {
+		running, info, err := supervisor.IsRunning(d.Paths, r.name)
+		if err != nil {
+			return nil, false, &Error{Msg: "checking whether the runner is running: " + err.Error(), Err: err}
+		}
+		if running {
+			who := ""
+			if info.PID > 0 {
+				who = fmt.Sprintf(" (supervisor pid %d)", info.PID)
+			}
+			return nil, false, &Error{
+				Msg:  fmt.Sprintf("runner '%s' is running%s; --force would replace its files while it runs", r.name, who),
+				Hint: "Stop it with 'ownci stop', then run setup again.",
+			}
+		}
+	}
 	return prev, registered, nil
 }
 

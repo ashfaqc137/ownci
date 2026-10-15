@@ -129,3 +129,33 @@ kill %1
 - [ ] Stop leaves no orphan processes (tested).
 - [ ] The t06 "must not be running" TODO is resolved.
 - [ ] Implementation notes: the state schema, `IsRunning`/`Stop` signatures, the `beforeLaunch` hook location.
+
+## Implementation notes
+
+**APIs for later tasks** (`internal/supervisor`, `//go:build linux`)
+- `supervisor.IsRunning(paths config.Paths, name string) (bool, PidInfo, error)`: true only if some process holds the flock on `run/<name>.lock` (probed with a shared non-blocking flock; a missing lock file means not running). `PidInfo{PID, Mode, StartedAt, OwnciVersion}` comes from the informational pidfile and may be zero.
+- `supervisor.Stop(ctx, paths, name, StopOptions{Timeout, Force, IsOwnci}) error`: SIGTERM to the pidfile's pid (after `IsOwnci(pid)`, default checks `/proc/<pid>/cmdline` for `ownci*` or a `__supervise` arg), waits for the lock to be released. Errors: `ErrNotRunning`, `ErrStopTimeout`. `Force` kills the supervisor first, then the runner group (`RunnerPID` from state), removes the pidfile and writes state `stopped`.
+- `supervisor.Run(ctx, Options) (State, error)`; `Options{Paths, Name, Mode, OwnciVersion, Echo, Env, Grace, Backoff, MaxRestarts, RestartWindow, Signals, BeforeLaunch, Logger, Now}`. A crashed runner is a *state*, not an error; the error is for `ErrAlreadyRunning` and I/O.
+- `supervisor.ReadState(path) (*State, error)` (nil, nil when absent), `ReadPidFile`, `ParseLine(line) Event`, `LastLines(path, n)`, phase helpers `Phase.Active()/Failed()/Hint()`.
+- **State schema** (`run/<name>.state.json`, camelCase): `name, phase, since, runnerVersion, runnerPid, currentJob, lastJob{name,result,finishedAt}, lastError, exitCode, restarts, supervisorPid`. Phases: `starting|connected|listening|busy|reconnecting|stopping|stopped|crashed|registration_lost|version_deprecated|duplicate_session`.
+- **`beforeLaunch` hook**: `beforeLaunch(ctx, app, cfg)` in `internal/cli/supervise.go` (a no-op; t08 fills it). It is wired into `supervisor.Options.BeforeLaunch`, so it runs before *every* launch (restarts included) in both the foreground `start` and the detached `__supervise` process. An error ends the run in phase `crashed`.
+- `cli.runSupervisor`, `cli.failureError`, `cli.checkStartPreconditions` are shared by `start` and `__supervise`. `status` is `gatherStatus` (data, JSON-tagged `statusReport`) + `renderStatus` in `internal/cli/status.go`. t08 adds its isolation section to `statusReport`/`renderStatus`.
+
+**Behavior decisions / deviations**
+- Runner output goes through `logging.Redact` per line (log file, terminal echo and the last-20-lines buffer) instead of `RedactWriter`; same masking, and the lines are needed as strings for the parser anyway.
+- A stop is also triggered by `ctx` cancellation (besides SIGINT/SIGTERM), and `Options.Signals` replaces the OS signal channel (tests send signals through it).
+- After `run.sh` exits, the supervisor SIGKILLs the runner's process group to sweep stray children (the listener can outlive `run.sh`).
+- `acquireLock` retries 3×30 ms on contention so a concurrent `IsRunning` probe (shared lock) cannot make a legitimate start fail. `start --detach` does not probe the lock while polling: it reads `state.json` and only trusts a state whose `supervisorPid` is the child it spawned, and detects a dead child through `Wait`.
+- `status` trusts the state file only if the pidfile pid matches `supervisorPid`; otherwise `State: unknown`. A held lock with a state from another supervisor never shows `listening`.
+- `stop` without a config prints "not set up" and exits 0. `stop` when the pidfile is missing/foreign but the lock is held returns an error (hint: check `ownci status`).
+- `ownci version` reads the config read-only (no data-dir creation): prints `runner: <version>` (state's `runnerVersion` if present, else the config's `installedVersion`), and adds a `runner` key to `--json`.
+- Resolved the t06 TODO: `setup --force` refuses while the runner's lock is held (`internal/setup/setup.go` `detectExisting`), hint `ownci stop`.
+- `start` prints the WSL note to stderr (not stdout) so `start --detach` stdout stays the single result line.
+- The `FAKE_RUNNER_EXIT_CODE` crash path takes ~65 s with the default backoff, so it was not repeated by hand; it is covered with short backoffs in `TestRunCrashRestartsThenCrashed`.
+
+**Known limitations / TODOs**
+- Linux only (`//go:build linux` in `supervisor`, so `cli` does not build elsewhere, per D9).
+- `status` queries Docker every time (≤10 s timeout) even for a quick look.
+- A stale `state.json` left by a SIGKILLed supervisor stays on disk until the next start; `status` reports it as "stopped (unexpectedly …)" which is the intended behavior.
+
+**Verification run (2026-10-15)**: `make check` green (supervisor tests run with `-race`: parser table, state machine, listen/stop, simulated job, redaction, crash→`crashed` after 3 restarts, exit 7, registration lost / duplicate session, second supervisor, stale pidfile, `BeforeLaunch` error, stop during backoff, SIGINT→SIGKILL escalation, `Stop` graceful and `--force` against a re-exec'd test binary; cli tests for preconditions, the detached lifecycle via the test-binary re-exec, foreground SIGINT, status truthfulness table, `--json`, `--remote` online/offline/no-token, version). Manual flow with `bin/ownci-dev` + `tools/fakegh` and the real Docker check (29.5.3): status before start (not running, no "listening"); `start --detach` → listening (pid 59871); `status` running/detached/listening, runner 9.9.9-fake; `status --remote` → online, idle; second `start` → "already running", exit 1; simulated job → `Last job build → Succeeded`; `stop` → stopped, registration kept; `status` → not running; no runner processes left.
