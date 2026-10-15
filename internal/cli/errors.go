@@ -24,6 +24,12 @@ type UserError struct {
 
 func (e *UserError) Error() string { return e.Msg }
 
+// exitError ends the process with Code without printing anything; the command
+// has already reported the problem itself (e.g. doctor's FAIL lines).
+type exitError struct{ Code int }
+
+func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.Code) }
+
 // ErrNotImplemented is returned by commands that are still stubs.
 var ErrNotImplemented = &UserError{
 	Msg:  "not implemented",
@@ -36,6 +42,10 @@ var ErrNotImplemented = &UserError{
 func renderError(w io.Writer, err error) int {
 	if err == nil {
 		return exitOK
+	}
+	var ee *exitError
+	if errors.As(err, &ee) {
+		return ee.Code
 	}
 	var ue *UserError
 	if errors.As(err, &ue) {

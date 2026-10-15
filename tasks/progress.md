@@ -9,7 +9,7 @@
 |------|-------|-------------------|-----------------|--------|-------|
 | t01 | Scaffolding, CLI skeleton, build tooling | ✅ | – | – | |
 | t02 | Platform, data dir & config, logging | ✅ | – | – | |
-| t03 | Exec seam, Docker checks, `doctor` | – | – | – | |
+| t03 | Exec seam, Docker checks, `doctor` | ✅ | – | – | |
 | t04 | Runner download, verify, extract, fake runner | – | – | – | |
 | t05 | GitHub client, `tools/fakegh` | – | – | – | |
 | t06 | `setup` | – | – | – | |

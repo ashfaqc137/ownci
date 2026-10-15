@@ -107,3 +107,39 @@ sudo ./bin/ownci doctor                   # expect: [FAIL] user … root
 - [ ] Every FAIL/WARN has an actionable hint.
 - [ ] No test depends on a real Docker daemon or on network access.
 - [ ] Implementation notes document the `execx.Fake` usage pattern for later tasks.
+
+## Implementation notes
+
+**Deviations**
+- `docker` cannot import `cli`, so failures are `*docker.Error{Msg, Hint}` (implements `error`). `Status.Err` holds one; `doctor.DockerCheck` copies the hint into the report. `Status` also has `OK() bool`.
+- `docker.Check(ctx, r)` reads `$WSL_DISTRO_NAME` for the shim hint (falls back to "this distro"); tests use the unexported `check(ctx, r, distro)`.
+- `docker.Client{Exec}` is only a thin holder with `Check(ctx)`; t08 adds the cleanup-container run to it.
+- `runner-deps` tries `ldconfig`, then `/sbin/ldconfig` and `/usr/sbin/ldconfig`, because ldconfig is usually not on a normal user's PATH. The ICU-missing hint lists apt/dnf/zypper (the dev machine is openSUSE Tumbleweed).
+- `doctor` exit 3 uses a new silent `cli.exitError{Code}` (handled in `renderError`, prints nothing), so FAIL output isn't followed by an `Error:` line. Warnings keep exit 0.
+- `doctor --json` is `{"results":[{name,level,detail,hint?}], "summary":{passed,warnings,failed}}`; levels are the strings `pass|warn|fail`.
+- `doctor` takes no positional args (`cobra.NoArgs`), so it was removed from `TestStubsNotImplemented`.
+- No colour output.
+- `execx.NewOS` redacts the logged command line itself (with `logging.Redact`), independent of the logger passed in.
+
+**API for later tasks**
+- `execx.Cmd{Name, Args, Dir, Env, Stdin}` (+ `String()`), `execx.Result{Stdout, Stderr, ExitCode}`, `execx.Runner{Run, LookPath}`, `execx.NewOS(*slog.Logger) Runner` (nil logger OK).
+- **`execx.Fake` pattern:**
+  ```go
+  f := execx.NewFake()
+  f.SetPath("docker", "/usr/bin/docker")                 // LookPath table
+  f.On("docker", "version").Stdout(`{...}`)              // match by name + args prefix
+  f.On("docker", "run").Exit(125).Stderr("boom")
+  f.On("config.sh").Fail(errors.New("cannot start"))      // Run returns this error
+  // ... code under test ...
+  f.Calls()                                               // []execx.Cmd, in order
+  ```
+  Longest args-prefix wins; the last registered wins ties; an unscripted command returns an error (so tests fail loudly). A `Rule` is built with `Stdout/Stderr/Exit/Fail`.
+- `docker.Check(ctx, r) Status`, `docker.Status{CLIPath, CLIFound, DesktopShim, DaemonReachable, ServerVersion, ServerOS, Err}`, `docker.Client`.
+- `doctor.Run(ctx, []Check) Report`, `Report.Failed()/Count(Level)`, `Level{Pass,Warn,Fail}`, `Result{Name,Level,Detail,Hint}`; constructors `PlatformCheck(info)`, `WSLCheck(info)`, `UserCheck(geteuid)`, `DataDirCheck(dir)`, `RunnerDepsCheck(r)`, `DockerCheck(r)`, `GitCheck(r)`.
+- cli test seams (package vars in `internal/cli/doctor.go`): `newExecRunner`, `geteuid`. Test helper `useFake(t, f)` in `doctor_test.go`.
+
+**Known limitations**
+- The `sudo ./bin/ownci doctor` manual step was not run (needs a password prompt); root detection is covered by unit tests with an injected `geteuid`.
+- The healthy-Docker `[PASS] docker` manual step is pending until WSL integration is enabled (open item t03 → t06).
+
+**Verification run**: `make check` passes. `OWNCI_DATA_DIR=/tmp/ownci-t03 ./bin/ownci doctor` → 6 pass, `[FAIL] docker` with the WSL-integration hint for `openSUSE-Tumbleweed`, exit 3. `doctor --json | python3 -m json.tool` valid. `--data-dir /mnt/c/Users/Public/ownci-test-t03 doctor` → `[WARN] data-dir … Windows mount`.
