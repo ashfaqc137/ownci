@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
+	"github.com/ashfaqc137/ownci/internal/github"
 	"github.com/ashfaqc137/ownci/internal/runner"
+	"github.com/ashfaqc137/ownci/internal/setup"
 	"github.com/spf13/cobra"
 )
 
@@ -13,25 +16,69 @@ var assetFor = runner.AssetFor
 
 func newSetupCmd() *cobra.Command {
 	var (
+		o            setup.Options
 		downloadOnly bool
-		name         string
-		force        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Download, verify and register the official GitHub Actions runner",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Set this machine up as a GitHub Actions runner for one repository.
+
+Downloads and verifies the official runner, registers it with the label
+'ownci' only (workflows use 'runs-on: [ownci]'), and saves OwnCI's config.
+Needs a token with admin access to the repository: $GITHUB_TOKEN, $GH_TOKEN
+or 'gh auth login'. The token is never stored.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !downloadOnly {
-				return ErrNotImplemented // full setup arrives in t06
+			if downloadOnly {
+				return runDownloadOnly(cmd, o.Name, o.Force)
 			}
-			return runDownloadOnly(cmd, name, force)
+			if o.Repo == "" {
+				return &UserError{
+					Msg:  "--repo is required",
+					Hint: "Run 'ownci setup --repo owner/name'.",
+					Code: exitUsage,
+				}
+			}
+			return runSetup(cmd, o)
 		},
 	}
-	cmd.Flags().BoolVar(&downloadOnly, "download-only", false, "download, verify and extract the runner without registering it")
-	cmd.Flags().StringVar(&name, "name", "", "runner name (default: ownci-<hostname>)")
-	cmd.Flags().BoolVar(&force, "force", false, "replace an existing, unregistered runner directory")
+	f := cmd.Flags()
+	f.StringVar(&o.Repo, "repo", "", "repository to serve: owner/name or its GitHub URL")
+	f.StringVar(&o.Name, "name", "", "runner name (default: ownci-<hostname>)")
+	f.StringSliceVar(&o.Labels, "labels", nil, "extra runner labels, comma-separated (the label 'ownci' is always added)")
+	f.BoolVar(&o.Force, "force", false, "re-register an existing runner in place, or replace an unregistered runner directory")
+	f.BoolVar(&o.AllowPublicRepo, "allow-public-repo", false, "allow a public repository (fork PRs can run code on this machine)")
+	f.BoolVar(&o.DryRun, "dry-run", false, "show what would be done without changing anything")
+	f.BoolVar(&downloadOnly, "download-only", false, "download, verify and extract the runner without registering it")
+	f.BoolVar(&o.SkipDockerCheck, "skip-docker-check", false, "skip the Docker preflight check (debugging only)")
+	_ = f.MarkHidden("skip-docker-check")
 	return cmd
+}
+
+func runSetup(cmd *cobra.Command, o setup.Options) error {
+	app := appFrom(cmd)
+	host, _ := os.Hostname()
+	err := setup.Run(cmd.Context(), setup.Deps{
+		Paths:      app.Paths,
+		Platform:   app.Platform,
+		Exec:       newExecRunner(app.Logger),
+		HTTP:       newHTTPClient(),
+		Logger:     app.Logger,
+		Out:        app.Out,
+		Err:        app.Err,
+		Getenv:     os.Getenv,
+		Geteuid:    geteuid,
+		Hostname:   host,
+		AssetFor:   assetFor,
+		APIBaseURL: github.APIBaseURL(),
+		WebBaseURL: github.WebBaseURL(),
+	}, o)
+	var se *setup.Error
+	if errors.As(err, &se) && se.Usage {
+		return &UserError{Msg: se.Msg, Hint: se.Hint, Code: exitUsage}
+	}
+	return err
 }
 
 func runDownloadOnly(cmd *cobra.Command, name string, force bool) error {

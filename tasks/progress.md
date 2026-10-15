@@ -12,7 +12,7 @@
 | t03 | Exec seam, Docker checks, `doctor` | ✅ | – | – | |
 | t04 | Runner download, verify, extract, fake runner | ✅ | – | – | |
 | t05 | GitHub client, `tools/fakegh` | ✅ | – | – | |
-| t06 | `setup` | – | – | – | |
+| t06 | `setup` | ✅ | – | – | |
 | t07 | `start` / `stop` / `status` | – | – | – | |
 | t08 | Isolation enforcement + cleanup hook | – | – | – | |
 | t09 | `uninstall` / `logs` | – | – | – | |
@@ -25,8 +25,9 @@ Post-release ideas are collected in [`future.md`](future.md).
 ## Open items (cross-task)
 
 <!-- Anything a later task must pick up. Format: - [ ] (tNN → tMM) description. Tick when resolved and name the resolving task. -->
-- [ ] (t03 → t06) Enable Docker Desktop WSL integration for this distro before t06 (setup/start require Docker)
-- [ ] (t06 → t07) `setup --force` must refuse while the runner is running (lock check; TODO left in t06)
+- [x] (t03 → t06) Enable Docker Desktop WSL integration for this distro before t06 (setup/start require Docker) — resolved: the real Docker check passed during t06 verification (2026-10-15)
+- [ ] (t06 → t07) `setup --force` must refuse while the runner is running (lock check; `// t07:` TODO in `internal/setup/setup.go` `detectExisting`)
+- [ ] (t06 → t08) Implement `installIsolation` in `internal/setup/setup.go` (step 10: write `.env` and the cleanup hook); until then a set-up runner does not enforce D1
 - [ ] (t08 → t10) Document the remaining isolation gaps (network access, sibling containers via `services:`/`docker://`, shared Docker daemon, root in the job container) in the README
 - [ ] (t08 → t10) Verify on real GitHub: the job-completed hook timing relative to the job-container stop
 - [ ] (t08 → t10) Verify on real GitHub: wiping `_work` (except `_temp`, `_PipelineMapping`) doesn't break the runner
@@ -42,6 +43,6 @@ Post-release ideas are collected in [`future.md`](future.md).
 
 <!-- Machine facts that matter to later tasks. -->
 - Dev machine: WSL2 (kernel 6.18, `microsoft-standard-WSL2`), Go 1.27.2, `gh` installed.
-- Docker: Docker Desktop on Windows; WSL integration **off** as of 2026-10-14.
+- Docker: Docker Desktop on Windows; WSL integration **on** as of 2026-10-15 (the real `docker` preflight passed).
 - Pinned runner version: 2.338.0 (pinned 2026-10-15)
 - Cleanup image digest: _(set in t08)_

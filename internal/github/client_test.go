@@ -258,3 +258,10 @@ func TestDebugLogsContainNoToken(t *testing.T) {
 		}
 	}
 }
+
+func TestWithHTTPClientNilKeepsDefault(t *testing.T) {
+	_, ts := newFake(t, fakegh.Options{})
+	if _, err := client(ts, WithHTTPClient(nil)).GetRepo(context.Background(), repo); err != nil {
+		t.Fatal(err)
+	}
+}

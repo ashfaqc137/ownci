@@ -98,3 +98,35 @@ kill %1
 - [ ] D2 and D3 are enforced and covered by tests.
 - [ ] Setup is safe to re-run. Every refusal has a hint.
 - [ ] Implementation notes: the setup step list with the t08 insertion point, and the `Configure`/`ReadRunnerFile` signatures.
+
+## Implementation notes
+
+**Step list** (`internal/setup/setup.go`, `setup.Run(ctx, Deps, Options) error`; numbers match the spec):
+1 `preflight` (platform, user, data-dir, docker; `runner-deps` and any WARN only warn; stops at the first FAIL, before any network) → 2 `detectExisting` (local) → 3 `ResolveToken` → 4 `checkRepo` (D3 public gate, admin) → 5 `checkNameFree` → `--dry-run` stops here (`dryRun`) → 6 `install` → 7 `RegistrationToken` → 8 `runner.Configure` → 9 `verify` → **10 `installIsolation(ctx, deps, runnerDir)` — the t08 insertion point (currently a no-op in `setup.go`; t08 writes `.env` + hook there)** → 11 `config.Save` → 12 next-steps output.
+
+**APIs for later tasks**
+- `runner.Configure(ctx, ex execx.Runner, dir string, o ConfigureOptions) error` with `ConfigureOptions{URL, Token, Name string; Labels []string; Replace bool}`; `runner.ConfigureArgs(o, maskToken bool) []string`. On failure the `*runner.Error` message holds the last 20 lines of config.sh output (redacted) and hints `ownci doctor`. t09 can reuse the same pattern for `config.sh remove`.
+- `runner.ReadRunnerFile(dir) (RunnerFile{AgentID, PoolID int64; AgentName, ServerURL, GitHubURL, WorkFolder string}, error)` strips the BOM; accepts numeric or quoted ids. `runner.Registered(dir) bool` = `.runner` exists. Neither touches `.credentials*`.
+- `setup.Deps{Paths, Platform, Exec, HTTP, Logger, Out, Err, Getenv, Geteuid, Hostname, AssetFor, APIBaseURL, WebBaseURL, Now}`, `setup.Options{Repo, Name, Labels, Force, AllowPublicRepo, DryRun, SkipDockerCheck}`, `setup.ValidateLabels`. `*setup.Error{Msg, Hint, Err, Usage}` has `UserHint()`; the cli maps `Usage` errors to exit 2 and renders the rest through the existing `hinted` path (exit 1).
+- `cli.runSetup` builds `Deps` from `App` plus the existing test seams (`newExecRunner`, `geteuid`, `newHTTPClient`, `assetFor`).
+- Test harness worth reusing (`internal/setup/setup_test.go`): `newEnv` (fakegh + `httptest` + temp data dir + request counter), `routeRunner` (sends `config.sh` and `Runner.Listener` to the real OS, everything else to an `execx.Fake`), `assertNoSecrets`, `burnFirstRegistrationToken`.
+
+**Behavior decisions / deviations**
+- **Bug found and fixed in t05's client**: `github.WithHTTPClient(nil)` set a nil client (the cli's `newHTTPClient()` returns nil), which would have panicked on the first real request. It now keeps the default client; test added.
+- Reserved labels are broader than the spec's four: `self-hosted, linux, windows, macos, x64, x86, arm, arm64` (case-insensitive). Labels are trimmed and de-duplicated; a user-supplied `ownci` is dropped (it is always added). `--labels` is a comma-separated `StringSlice`.
+- Name resolution: with a saved config and no `--name`, the configured name is reused (so a different hostname doesn't look like a different runner). An explicit `--name` or `--repo` that differs from the saved config is refused even with `--force` (D11), hint `uninstall --unregister`.
+- A `.runner` file with no `config.json` (an earlier save failed) is treated as registered: it needs `--force`, with its own message.
+- A corrupt `config.json` stops setup with the `Load` error plus a `--force` hint. With `--force` it is ignored with a warning.
+- `--force` always passes `--replace` to config.sh (needed when a same-named runner exists on GitHub). With `--force` on an already-registered runner the extracted runner is reused (no download); the version comes from `Runner.Listener --version`.
+- An extracted-but-unregistered directory (a failed earlier setup) is replaced on retry without `--force`.
+- `createdAt` is preserved on `--force` re-registration.
+- `--dry-run` still goes through steps 1–5, so it refuses non-admin/public repos too, and needs a token. It downloads nothing and requests no registration token.
+- Preflight skipped Docker only with the hidden `--skip-docker-check` (prints a warning).
+- The `TestStubsNotImplemented` list no longer includes `setup`; `TestSetupWithoutDownloadOnlyStillStub` was replaced by usage-error tests.
+
+**Known limitations / TODOs**
+- `// t07:` in `detectExisting`: `--force` must refuse while the runner is running (lock check).
+- `installIsolation` is a no-op until t08, so a runner set up now does not yet enforce D1 (no `.env`).
+- A failed `FindRunner` after configure only warns.
+
+**Verification run (2026-10-15)**: `make check` green; new tests in `internal/setup`, `internal/runner` (`configure_test.go`), `internal/cli`, `internal/github`. Manual flow with `bin/ownci-dev` against `tools/fakegh` (spec's script, with `--skip-docker-check` where noted): dry-run printed the plan with `--token ***` and created nothing; setup wrote `config.json` mode 600 and fakegh listed one runner with labels `["ownci"]`; second setup refused (exit 1); `--force` re-registered with `--replace` and no re-download; `me/pub` refused (and allowed with the flag, with the warning); `me/noadmin` refused with the permission hint; `--repo me/other --force` refused; `grep -c FAKE-REG logs/ownci.log` → 0. The real Docker check passed on this machine (WSL integration is now on).

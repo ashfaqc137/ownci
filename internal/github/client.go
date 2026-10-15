@@ -55,8 +55,16 @@ type Client struct {
 // Option configures a Client.
 type Option func(*Client)
 
-func WithBaseURL(u string) Option          { return func(c *Client) { c.baseURL = strings.TrimRight(u, "/") } }
-func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
+func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = strings.TrimRight(u, "/") } }
+
+// WithHTTPClient sets the HTTP client; nil keeps the default.
+func WithHTTPClient(h *http.Client) Option {
+	return func(c *Client) {
+		if h != nil {
+			c.http = h
+		}
+	}
+}
 func WithLogger(l *slog.Logger) Option     { return func(c *Client) { c.log = l } }
 func WithTokenSource(s TokenSource) Option { return func(c *Client) { c.src = s } }
 

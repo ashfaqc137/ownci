@@ -1,0 +1,426 @@
+// Package setup implements `ownci setup`: it takes a machine from nothing to
+// a registered, configured runner. It returns errors with hints and writes
+// progress to the writers it is given; flag parsing and exit codes stay in cli.
+package setup
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/ashfaqc137/ownci/internal/config"
+	"github.com/ashfaqc137/ownci/internal/doctor"
+	"github.com/ashfaqc137/ownci/internal/execx"
+	"github.com/ashfaqc137/ownci/internal/github"
+	"github.com/ashfaqc137/ownci/internal/platform"
+	"github.com/ashfaqc137/ownci/internal/runner"
+)
+
+const (
+	// IsolationMode is recorded in config.json (D1).
+	IsolationMode = "docker-job-container"
+	securityDocs  = "https://docs.github.com/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security"
+	permissionFix = "Use a fine-grained PAT with 'Administration: read & write' on this repository, or a classic PAT with the 'repo' scope."
+)
+
+// Error is a setup failure with an actionable hint. The cli layer renders it
+// through UserHint (this package must not import cli).
+type Error struct {
+	Msg, Hint string
+	Err       error
+	Usage     bool // bad input: the cli reports exit code 2
+}
+
+func (e *Error) Error() string    { return e.Msg }
+func (e *Error) Unwrap() error    { return e.Err }
+func (e *Error) UserHint() string { return e.Hint }
+
+// Options are the user's choices (the flags of `ownci setup`).
+type Options struct {
+	Repo            string   // "owner/name" or a GitHub URL
+	Name            string   // "" = default (or the configured runner's name)
+	Labels          []string // extra labels; "ownci" is always added
+	Force           bool
+	AllowPublicRepo bool
+	DryRun          bool
+	SkipDockerCheck bool
+}
+
+// Deps are the collaborators, injected so tests need no network or Docker.
+type Deps struct {
+	Paths      config.Paths
+	Platform   platform.Info
+	Exec       execx.Runner
+	HTTP       *http.Client // nil = package defaults
+	Logger     *slog.Logger
+	Out, Err   io.Writer
+	Getenv     func(string) string
+	Geteuid    func() int
+	Hostname   string
+	AssetFor   func(arch string) (runner.Asset, error)
+	APIBaseURL string // GitHub REST base
+	WebBaseURL string // github.com base, used for the runner's --url
+	Now        func() time.Time
+}
+
+type run struct {
+	d    Deps
+	o    Options
+	repo github.Repo
+	name string
+	dir  string
+}
+
+// Run executes the setup flow. See tasks/t06-setup.md for the step list; the
+// numbers in comments refer to it.
+func Run(ctx context.Context, d Deps, o Options) error {
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	if d.Logger == nil {
+		d.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	repo, err := github.ParseRepo(o.Repo)
+	if err != nil {
+		return err
+	}
+	labels, err := ValidateLabels(o.Labels)
+	if err != nil {
+		return err
+	}
+	name := o.Name
+	if name == "" {
+		name = runner.DefaultName(d.Hostname)
+	}
+	r := &run{d: d, o: o, repo: repo, name: name}
+
+	// 1. Preflight (no network).
+	if err := r.preflight(ctx); err != nil {
+		return err
+	}
+	// 2. Existing install detection (local).
+	prev, registered, err := r.detectExisting()
+	if err != nil {
+		return err
+	}
+	if err := runner.ValidateName(r.name); err != nil {
+		return err
+	}
+	r.dir = d.Paths.RunnerDir(r.name)
+	allLabels := append([]string{"ownci"}, labels...)
+
+	// 3. Token.
+	token, src, err := github.ResolveToken(ctx, d.Getenv, d.Exec)
+	if err != nil {
+		return err
+	}
+	r.ok("GitHub token from %s", src)
+	gh := github.NewClient(token,
+		github.WithBaseURL(d.APIBaseURL), github.WithHTTPClient(d.HTTP),
+		github.WithLogger(d.Logger), github.WithTokenSource(src))
+
+	// 4. Repo checks, 5. name collision on GitHub.
+	if err := r.checkRepo(ctx, gh); err != nil {
+		return err
+	}
+	if err := r.checkNameFree(ctx, gh); err != nil {
+		return err
+	}
+
+	repoURL := d.WebBaseURL + "/" + repo.String()
+	reuse := registered && o.Force // an extracted, registered runner is kept as is
+	if o.DryRun {
+		return r.dryRun(repoURL, allLabels, reuse)
+	}
+
+	// 6. Download & extract.
+	version, err := r.install(ctx, reuse, prev)
+	if err != nil {
+		return err
+	}
+	// 7. Registration token (single-use, short-lived).
+	reg, err := gh.RegistrationToken(ctx, repo)
+	if err != nil {
+		return err
+	}
+	// 8. Configure.
+	if err := runner.Configure(ctx, d.Exec, r.dir, runner.ConfigureOptions{
+		URL: repoURL, Token: reg.Token, Name: r.name, Labels: allLabels, Replace: o.Force,
+	}); err != nil {
+		return err
+	}
+	r.ok("Runner configured")
+	// 9. Verify.
+	if err := r.verify(ctx, gh); err != nil {
+		return err
+	}
+	// 10. t08 insertion point: .env and hooks.
+	if err := installIsolation(ctx, d, r.dir); err != nil {
+		return err
+	}
+	// 11. Persist.
+	created := d.Now().UTC()
+	if prev != nil {
+		created = prev.CreatedAt
+	}
+	cfg := &config.Config{Runner: &config.RunnerConfig{
+		Name: r.name, Provider: "github", Repo: repo.String(), URL: repoURL, Labels: allLabels,
+		InstalledVersion: version, Isolation: IsolationMode, CreatedAt: created,
+	}}
+	if err := config.Save(d.Paths, cfg); err != nil {
+		return &Error{
+			Msg: fmt.Sprintf("the runner is registered on GitHub, but saving OwnCI's config failed: %v", err),
+			Hint: fmt.Sprintf("Remove the registration with 'ownci uninstall --unregister --name %s', or retry 'ownci setup --repo %s --force'.",
+				r.name, repo),
+			Err: err,
+		}
+	}
+	// 12. Next steps.
+	fmt.Fprintf(d.Out, "✓ OwnCI is set up for %s as runner '%s' (labels: %s)\n", repo, r.name, strings.Join(allLabels, ","))
+	fmt.Fprintf(d.Out, "Next:\n  1. Start contributing compute:   ownci start\n"+
+		"  2. Target it from a workflow:    runs-on: [ownci]   and   container: <image>\n"+
+		"     (jobs without 'container:' will be rejected by this runner)\n")
+	return nil
+}
+
+func (r *run) ok(format string, a ...any) { fmt.Fprintf(r.d.Out, "✓ "+format+"\n", a...) }
+func (r *run) warn(format string, a ...any) {
+	fmt.Fprintf(r.d.Err, "Warning: "+format+"\n", a...)
+}
+
+// preflight runs the doctor checks setup depends on and stops at the first
+// failure. runner-deps only warns: the runner may work anyway.
+func (r *run) preflight(ctx context.Context) error {
+	d := r.d
+	checks := []doctor.Check{
+		doctor.PlatformCheck(d.Platform),
+		doctor.UserCheck(d.Geteuid),
+		doctor.DataDirCheck(d.Paths.Root),
+	}
+	names := []string{"platform", "user", "data-dir"}
+	if r.o.SkipDockerCheck {
+		r.warn("skipping the Docker check (--skip-docker-check); jobs will fail without a working Docker")
+	} else {
+		checks = append(checks, doctor.DockerCheck(d.Exec))
+		names = append(names, "docker")
+	}
+	checks = append(checks, doctor.RunnerDepsCheck(d.Exec))
+
+	for _, c := range checks {
+		res := doctor.Run(ctx, []doctor.Check{c}).Results[0]
+		d.Logger.Debug("preflight", "check", res.Name, "level", res.Level.String(), "detail", res.Detail)
+		switch {
+		case res.Level == doctor.Pass:
+		case res.Name == "runner-deps" || res.Level == doctor.Warn:
+			r.warn("%s: %s", res.Name, res.Detail)
+			if res.Hint != "" {
+				fmt.Fprintf(d.Err, "Hint: %s\n", res.Hint)
+			}
+		default:
+			return &Error{Msg: fmt.Sprintf("%s check failed: %s", res.Name, res.Detail), Hint: res.Hint}
+		}
+	}
+	r.ok("Preflight checks passed (%s)", strings.Join(names, ", "))
+	return nil
+}
+
+// detectExisting applies the local rules of step 2. It returns the saved
+// runner config (if any) and whether the runner directory is registered.
+func (r *run) detectExisting() (prev *config.RunnerConfig, registered bool, err error) {
+	d, o := r.d, r.o
+	cfg, err := config.Load(d.Paths)
+	switch {
+	case err == nil:
+		prev = cfg.Runner
+	case errors.Is(err, config.ErrNotConfigured):
+	case o.Force:
+		r.warn("ignoring unreadable config: %v", err)
+	default:
+		return nil, false, &Error{Msg: err.Error(), Hint: "Re-run with --force to recreate it.", Err: err}
+	}
+
+	if prev != nil {
+		// D11: one runner per data dir, so a different repo or name needs an
+		// uninstall first, force or not.
+		if prev.Repo != r.repo.String() {
+			return nil, false, &Error{
+				Msg:  fmt.Sprintf("OwnCI is already set up for %s as '%s'; this data directory holds one runner", prev.Repo, prev.Name),
+				Hint: "Run 'ownci uninstall --unregister' first, then set up " + r.repo.String() + ". (--force cannot switch repositories.)",
+			}
+		}
+		if r.o.Name == "" {
+			r.name = prev.Name
+		} else if prev.Name != r.name {
+			return nil, false, &Error{
+				Msg:  fmt.Sprintf("OwnCI is already set up for %s as '%s'; this data directory holds one runner", prev.Repo, prev.Name),
+				Hint: "Run 'ownci uninstall --unregister' first to use a different --name.",
+			}
+		}
+	}
+	if err := runner.ValidateName(r.name); err != nil {
+		return nil, false, err
+	}
+	registered = runner.Registered(d.Paths.RunnerDir(r.name))
+	if registered && !o.Force {
+		msg := fmt.Sprintf("OwnCI is already set up for %s as '%s'", r.repo, r.name)
+		if prev == nil {
+			msg = fmt.Sprintf("a runner named '%s' is already registered in %s", r.name, d.Paths.RunnerDir(r.name))
+		}
+		return nil, false, &Error{
+			Msg:  msg,
+			Hint: "Run 'ownci status', or 'ownci uninstall --unregister' and then set up again, or pass --force to re-register in place.",
+		}
+	}
+	// t07: when the runner can be running (lock file), --force must refuse here.
+	return prev, registered, nil
+}
+
+// checkRepo enforces the trust gate (D3) and the admin requirement.
+func (r *run) checkRepo(ctx context.Context, gh *github.Client) error {
+	info, err := gh.GetRepo(ctx, r.repo)
+	if err != nil {
+		return err
+	}
+	r.ok("Repository %s (%s)", r.repo, info.Visibility)
+	if !info.Private {
+		if !r.o.AllowPublicRepo {
+			return &Error{
+				Msg:  fmt.Sprintf("%s is a public repository: pull requests from forks could run arbitrary code on this machine through a self-hosted runner", r.repo),
+				Hint: "Use a private repository, or pass --allow-public-repo if you accept the risk. See " + securityDocs,
+			}
+		}
+		fmt.Fprintf(r.d.Err, "\nWARNING: %s is a public repository.\n"+
+			"  Pull requests from forks can run arbitrary code on this machine.\n"+
+			"  Strongly recommended: in the repository's Settings → Actions → General, set\n"+
+			"  \"Fork pull request workflows from outside collaborators\" to \"Require approval for all outside collaborators\".\n"+
+			"  See %s\n\n", r.repo, securityDocs)
+	}
+	if !info.Admin {
+		return &Error{
+			Msg:  fmt.Sprintf("the GitHub token has no admin access to %s, which registering a runner requires", r.repo),
+			Hint: permissionFix,
+		}
+	}
+	return nil
+}
+
+// checkNameFree refuses to clobber a runner of the same name on GitHub.
+func (r *run) checkNameFree(ctx context.Context, gh *github.Client) error {
+	existing, err := gh.FindRunner(ctx, r.repo, r.name)
+	if err != nil {
+		return err
+	}
+	if existing != nil && !r.o.Force {
+		return &Error{
+			Msg:  fmt.Sprintf("a runner named '%s' already exists on %s", r.name, r.repo),
+			Hint: "Choose another --name, or use --force to replace it.",
+		}
+	}
+	return nil
+}
+
+// install downloads and extracts the runner, unless a registered runner is
+// being re-registered in place. It returns the installed version ("" when it
+// could not be read).
+func (r *run) install(ctx context.Context, reuse bool, prev *config.RunnerConfig) (string, error) {
+	d := r.d
+	if reuse {
+		v, err := runner.InstalledVersion(ctx, d.Exec, r.dir)
+		if err != nil {
+			r.warn("could not read the installed runner version: %v", err)
+			if prev != nil {
+				return prev.InstalledVersion, nil
+			}
+		}
+		r.ok("Reusing the extracted runner %s", orUnknown(v))
+		return v, nil
+	}
+	asset, err := d.AssetFor(d.Platform.RunnerArch)
+	if err != nil {
+		return "", err
+	}
+	// A directory without .runner is a previous, unfinished setup: replace it.
+	_, statErr := os.Lstat(r.dir)
+	res, err := runner.Install(ctx, runner.InstallOptions{
+		Paths: d.Paths, Name: r.name, Asset: asset, Exec: d.Exec, HTTP: d.HTTP,
+		Force: statErr == nil, Progress: d.Out, Logger: d.Logger,
+	})
+	if err != nil {
+		return "", err
+	}
+	if res.VersionErr != nil {
+		r.warn("runner extracted to %s but its version could not be read: %v", res.Dir, res.VersionErr)
+		return "", nil
+	}
+	if res.InstalledVersion != res.ExpectedVersion {
+		r.warn("installed runner reports version %s, expected %s", res.InstalledVersion, res.ExpectedVersion)
+	}
+	r.ok("Runner %s downloaded, verified and extracted", res.InstalledVersion)
+	return res.InstalledVersion, nil
+}
+
+// verify reads .runner back and, best effort, confirms GitHub lists the runner.
+func (r *run) verify(ctx context.Context, gh *github.Client) error {
+	rf, err := runner.ReadRunnerFile(r.dir)
+	if err != nil {
+		return &Error{Msg: "config.sh succeeded but the runner file is unreadable: " + err.Error(),
+			Hint: "Re-run 'ownci setup --force'.", Err: err}
+	}
+	if rf.AgentName != r.name {
+		return &Error{Msg: fmt.Sprintf("the runner registered as '%s', expected '%s'", rf.AgentName, r.name),
+			Hint: "Re-run 'ownci setup --force'."}
+	}
+	found, err := gh.FindRunner(ctx, r.repo, r.name)
+	switch {
+	case err != nil:
+		r.warn("could not confirm the registration on GitHub: %v", err)
+	case found == nil:
+		r.warn("GitHub does not list runner '%s' yet (it may take a moment)", r.name)
+	default:
+		r.ok("Runner registered on GitHub (id %d)", found.ID)
+	}
+	return nil
+}
+
+// dryRun prints the plan without writing anything or requesting a
+// registration token.
+func (r *run) dryRun(repoURL string, labels []string, reuse bool) error {
+	out := r.d.Out
+	fmt.Fprintln(out, "Dry run: nothing will be changed.")
+	if reuse {
+		fmt.Fprintf(out, "Would reuse the extracted runner in %s\n", r.dir)
+	} else {
+		asset, err := r.d.AssetFor(r.d.Platform.RunnerArch)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Would download runner %s from %s\n  sha256 %s\n  and extract it to %s\n", asset.Version, asset.URL, asset.SHA256, r.dir)
+	}
+	args := runner.ConfigureArgs(runner.ConfigureOptions{
+		URL: repoURL, Token: "", Name: r.name, Labels: labels, Replace: r.o.Force,
+	}, true)
+	fmt.Fprintf(out, "Would run, in %s:\n  ./config.sh %s\n", r.dir, strings.Join(args, " "))
+	fmt.Fprintf(out, "Would save %s\n", r.d.Paths.ConfigFile)
+	return nil
+}
+
+// installIsolation is the t08 insertion point: it will write the runner's
+// .env (ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER, job-completed hook) and install
+// the cleanup hook.
+func installIsolation(_ context.Context, _ Deps, _ string) error {
+	// t08: write <dir>/.env and the hook script here.
+	return nil
+}
+
+func orUnknown(v string) string {
+	if v == "" {
+		return "(version unknown)"
+	}
+	return v
+}

@@ -107,10 +107,41 @@ func TestSetupDownloadOnlyBadName(t *testing.T) {
 	}
 }
 
-func TestSetupWithoutDownloadOnlyStillStub(t *testing.T) {
-	_, stderr, code := runCLI(t, "setup", "--name", "x")
-	if code != 2 || !strings.Contains(stderr, "not implemented") {
+func TestSetupUsageErrors(t *testing.T) {
+	cases := map[string][]string{
+		"missing repo":    {"setup"},
+		"forbidden label": {"setup", "--repo", "me/x", "--labels", "self-hosted"},
+		"invalid label":   {"setup", "--repo", "me/x", "--labels", "a b"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, stderr, code := runCLI(t, args...)
+			if code != 2 || !strings.Contains(stderr, "Error:") || !strings.Contains(stderr, "Hint:") {
+				t.Fatalf("exit %d, stderr %q", code, stderr)
+			}
+		})
+	}
+}
+
+func TestSetupInvalidRepo(t *testing.T) {
+	_, stderr, code := runCLI(t, "setup", "--repo", "not a repo")
+	if code != 1 || !strings.Contains(stderr, "invalid repository") || !strings.Contains(stderr, "owner/name") {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+}
+
+func TestSetupHelpShowsFlags(t *testing.T) {
+	stdout, _, code := runCLI(t, "setup", "--help")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	for _, f := range []string{"--repo", "--labels", "--allow-public-repo", "--dry-run", "--force", "--download-only"} {
+		if !strings.Contains(stdout, f) {
+			t.Errorf("help lacks %s", f)
+		}
+	}
+	if strings.Contains(stdout, "skip-docker-check") {
+		t.Error("--skip-docker-check must stay hidden")
 	}
 }
 
