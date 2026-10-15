@@ -14,7 +14,13 @@ func newVersionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print the ownci version and build information",
-		Args:  cobra.NoArgs,
+		Long: `Print the ownci version and build information.
+
+version does not touch the data directory. To check the data directory layout
+without another command, combine --verbose with --data-dir: the directory is
+then created and logged to as for any other command.`,
+		Args:        cobra.NoArgs,
+		Annotations: map[string]string{skipAppAnnotation: "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 			// t07: runner version

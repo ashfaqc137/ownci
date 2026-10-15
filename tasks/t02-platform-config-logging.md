@@ -85,3 +85,28 @@ go test ./internal/logging -run Redact -v    # expect: PASS, cases listed
 - [ ] Global DoD.
 - [ ] No code path writes a token pattern to `logs/ownci.log` (redaction tests prove this).
 - [ ] Implementation notes list the final exported API of `platform`, `config`, `logging`, and the `cli.App` fields.
+
+## Implementation notes
+
+**Deviations**
+- `Paths.Ensure()` is a wrapper over a new `Paths.EnsureNotify(notify func(string))`. The log file lives inside the data dir, so "tighten permissions, log at debug" can only be logged after `Ensure` returns. The cli collects the notices and logs them once the logger exists.
+- `Paths.Foreign()` is stateless: true when the root exists and the marker file does not. This matches the adoption rule (the marker is written only for a new or empty root) and needs no field on the value-receiver `Paths`.
+- `RedactWriter` returns `io.WriteCloser` (a superset of `io.Writer`). `Close()` flushes a trailing partial line and does not close the wrapped writer. Lines over 1 MiB are flushed in chunks, with a 256-byte tail held back.
+- The redacting handler also masks `error` and `fmt.Stringer` attribute values and recurses into groups, not just plain strings.
+- `Info.Supported()` returns a plain `error`. `platform` cannot import `cli`, so callers wrap it in a `UserError`. The pre-run does **not** fail on unsupported platforms; `doctor` (t03) reports it.
+- `--data-dir /` (or the home dir) exits **2** (invalid input) with Error/Hint.
+- The logged `args=` is rebuilt as `<command path> --flag=value… <positionals>`, since cobra does not expose the raw argv. Token flags are still masked by `Redact`.
+- `slog.NewMultiHandler` (stdlib) is used for file + stderr, so no extra dependency.
+- Test helper `runCLI` now sets `OWNCI_DATA_DIR` to a temp dir (so tests never touch the real one) and uses `newRoot()` to close the log file in `t.Cleanup`.
+
+**Exported API**
+- `platform`: `Info{OS, Arch, RunnerArch string; IsWSL bool; WSLDistro, KernelRelease string}`, `Detect() Info`, `DetectWith(readFile func(string)([]byte,error), getenv func(string) string, goos, goarch string) Info`, `(Info) Supported() error`, `IsWindowsMount(path string) bool`.
+- `config`: `ResolveDataDir(flagVal string, getenv func(string) string, home string) (string, error)`, `Paths{Root, Marker, ConfigDir, ConfigFile, LogsDir, OwnciLog, CacheDir, RunDir, RunnersDir}`, `NewPaths(root) Paths`, `(Paths) RunnerDir/RunnerLog/LockFile/PidFile/StateFile(name) string`, `(Paths) Ensure() error`, `(Paths) EnsureNotify(func(string)) error`, `(Paths) Foreign() bool`, `MarkerName`, `SchemaVersion`, `Config{SchemaVersion; Runner *RunnerConfig}`, `RunnerConfig{Name, Provider, Repo, URL, Labels, InstalledVersion, Isolation, CreatedAt}` (`CreatedAt` is `time.Time`), `Load(Paths) (*Config, error)`, `Save(Paths, *Config) error`, `ErrNotConfigured`.
+- `logging`: `Options{LogFile string; Verbose bool; Stderr io.Writer}`, `Setup(Options) (*slog.Logger, io.Closer, error)`, `Redact(string) string`, `RegisterSecret(string)`, `RedactWriter(io.Writer) io.WriteCloser`.
+- `cli.App{Paths config.Paths; Logger *slog.Logger; Platform platform.Info; Out, Err io.Writer}`. Commands get it with `appFrom(cmd)` (panics if the command is marked `skipApp`). Mark a command with `Annotations: {skipAppAnnotation: "true"}` to skip data-dir setup (only `version` does, unless `--verbose` and `--data-dir` are both given).
+
+**Known limitations**
+- `Load` returns `ErrNotConfigured` for a config whose schemaVersion is valid but `runner` is null; an unreadable-but-present file is a plain error.
+- `ResolveDataDir` treats a relative path as relative to the cwd (made absolute); `~` is not expanded.
+
+**Verification run**: `make check` passes. Manually: `./bin/ownci --data-dir /tmp/ownci-t02 --verbose version` → all dirs `drwx------`, `.ownci-data-dir` and `logs/ownci.log` `-rw-------`, log has the `ownci start` debug line. `OWNCI_DATA_DIR=/tmp/ownci-t02b ./bin/ownci status` → "not implemented" (exit 2) and the layout + marker exist. `./bin/ownci --data-dir / status` → Error/Hint, exit 2. `go test ./internal/logging -run Redact -v` → PASS.
