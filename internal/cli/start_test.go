@@ -40,6 +40,9 @@ func installRunner(t *testing.T) config.Paths {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not on PATH")
 	}
+	// A fake docker on PATH, so a supervisor re-executed by a test (which
+	// uses the real exec runner) never touches the real Docker or network.
+	testutil.UseFakeDocker(t)
 	paths := config.NewPaths(filepath.Join(t.TempDir(), "data"))
 	if err := paths.Ensure(); err != nil {
 		t.Fatal(err)

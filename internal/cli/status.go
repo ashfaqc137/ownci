@@ -15,6 +15,8 @@ import (
 	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/docker"
 	"github.com/ashfaqc137/ownci/internal/github"
+	"github.com/ashfaqc137/ownci/internal/hooks"
+	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/runner"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
 	"github.com/spf13/cobra"
@@ -58,6 +60,8 @@ type statusReport struct {
 
 	GitHub *githubStatus `json:"github,omitempty"`
 	Docker *dockerStatus `json:"docker,omitempty"`
+
+	Isolation *isolation.Report `json:"isolation,omitempty"`
 
 	LastError string `json:"lastError,omitempty"`
 }
@@ -212,6 +216,11 @@ func gatherStatus(ctx context.Context, app *App, remote bool) *statusReport {
 		rep.Docker.Detail = dst.Err.Error()
 	}
 
+	if rep.RunnerDirSet {
+		iso := isolation.Verify(ctx, ex, dir, hooks.CleanupImage)
+		rep.Isolation = &iso
+	}
+
 	if remote {
 		rep.GitHub = remoteStatus(ctx, app, cfg, rep)
 	}
@@ -295,6 +304,9 @@ func renderStatus(w io.Writer, r *statusReport) {
 		j := r.State.LastJob
 		row("Last job", "%s → %s at %s", j.Name, j.Result, fmtTime(j.FinishedAt))
 	}
+	if r.Isolation != nil {
+		row("Isolation", "%s", isolationLine(r.Isolation))
+	}
 	if r.GitHub != nil {
 		row("GitHub", "%s", githubLine(r.GitHub))
 		if r.GitHub.Warning != "" {
@@ -357,6 +369,19 @@ func renderState(row func(string, string, ...any), r *statusReport) {
 	default:
 		row("State", "—")
 	}
+}
+
+func isolationLine(i *isolation.Report) string {
+	mark := func(ok bool) string { return yesNo(ok, "✓", "✗") }
+	last := i.LastCleanup.Result
+	if last != "never" {
+		last += " at " + fmtTime(i.LastCleanup.Time)
+		if i.LastCleanup.Result == "failed" && i.LastCleanup.Detail != "" {
+			last += " (" + i.LastCleanup.Detail + ")"
+		}
+	}
+	return fmt.Sprintf("container jobs required %s   cleanup hook %s   cleanup image %s   last cleanup: %s",
+		mark(i.JobContainerRequired.OK), mark(i.CleanupHook.OK), mark(i.CleanupImage.OK), last)
 }
 
 func githubLine(g *githubStatus) string {

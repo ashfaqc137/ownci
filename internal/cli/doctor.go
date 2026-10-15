@@ -9,8 +9,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/doctor"
 	"github.com/ashfaqc137/ownci/internal/execx"
+	"github.com/ashfaqc137/ownci/internal/hooks"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +36,7 @@ Exits 3 when any check fails; warnings do not affect the exit code.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app := appFrom(cmd)
 			ex := newExecRunner(app.Logger)
-			rep := doctor.Run(cmd.Context(), []doctor.Check{
+			checks := []doctor.Check{
 				doctor.PlatformCheck(app.Platform),
 				doctor.WSLCheck(app.Platform),
 				doctor.UserCheck(geteuid),
@@ -42,7 +44,11 @@ Exits 3 when any check fails; warnings do not affect the exit code.`,
 				doctor.RunnerDepsCheck(ex),
 				doctor.DockerCheck(ex),
 				doctor.GitCheck(ex),
-			})
+			}
+			if cfg, err := config.Load(app.Paths); err == nil {
+				checks = append(checks, doctor.IsolationCheck(ex, app.Paths.RunnerDir(cfg.Runner.Name), hooks.CleanupImage))
+			}
+			rep := doctor.Run(cmd.Context(), checks)
 			var err error
 			if asJSON {
 				err = writeDoctorJSON(app.Out, rep)

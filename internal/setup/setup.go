@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/ashfaqc137/ownci/internal/doctor"
 	"github.com/ashfaqc137/ownci/internal/execx"
 	"github.com/ashfaqc137/ownci/internal/github"
+	"github.com/ashfaqc137/ownci/internal/hooks"
+	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/platform"
 	"github.com/ashfaqc137/ownci/internal/runner"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
@@ -161,8 +164,8 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	if err := r.verify(ctx, gh); err != nil {
 		return err
 	}
-	// 10. t08 insertion point: .env and hooks.
-	if err := installIsolation(ctx, d, r.dir); err != nil {
+	// 10. Isolation: .env enforcement, cleanup hook and image.
+	if err := installIsolation(ctx, d, r.dir, repo.String()); err != nil {
 		return err
 	}
 	// 11. Persist.
@@ -186,7 +189,9 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	fmt.Fprintf(d.Out, "✓ OwnCI is set up for %s as runner '%s' (labels: %s)\n", repo, r.name, strings.Join(allLabels, ","))
 	fmt.Fprintf(d.Out, "Next:\n  1. Start contributing compute:   ownci start\n"+
 		"  2. Target it from a workflow:    runs-on: [ownci]   and   container: <image>\n"+
-		"     (jobs without 'container:' will be rejected by this runner)\n")
+		"     (jobs without 'container:' will be rejected by this runner)\n"+
+		"Isolation notes: job containers can still reach the network, and 'services:' and\n"+
+		"'uses: docker://…' actions run as sibling containers on the same Docker daemon.\n")
 	return nil
 }
 
@@ -423,16 +428,34 @@ func (r *run) dryRun(repoURL string, labels []string, reuse bool) error {
 		URL: repoURL, Token: "", Name: r.name, Labels: labels, Replace: r.o.Force,
 	}, true)
 	fmt.Fprintf(out, "Would run, in %s:\n  ./config.sh %s\n", r.dir, strings.Join(args, " "))
+	fmt.Fprintf(out, "Would install the cleanup hook, require job containers in %s and pull %s\n", filepath.Join(r.dir, ".env"), hooks.CleanupImage)
 	fmt.Fprintf(out, "Would save %s\n", r.d.Paths.ConfigFile)
 	return nil
 }
 
-// installIsolation is the t08 insertion point: it will write the runner's
-// .env (ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER, job-completed hook) and install
-// the cleanup hook.
-func installIsolation(_ context.Context, _ Deps, _ string) error {
-	// t08: write <dir>/.env and the hook script here.
-	return nil
+// installIsolation makes D1 and D10 real: the job-container requirement and
+// the cleanup hook in the runner's .env, and the pinned cleanup image. The
+// runner is already registered at this point, so a failure tells the user how
+// to retry.
+func installIsolation(ctx context.Context, d Deps, dir, repo string) error {
+	err := isolation.Install(ctx, d.Exec, dir, hooks.CleanupImage)
+	if err == nil {
+		return nil
+	}
+	return &Error{
+		Msg: "the runner is registered, but its isolation settings could not be installed: " + err.Error(),
+		Hint: fmt.Sprintf("Fix the problem (%s), then run 'ownci setup --repo %s --force'.",
+			hintOr(err, "see the message above"), repo),
+		Err: err,
+	}
+}
+
+func hintOr(err error, def string) string {
+	var h interface{ UserHint() string }
+	if errors.As(err, &h) && h.UserHint() != "" {
+		return h.UserHint()
+	}
+	return def
 }
 
 func orUnknown(v string) string {

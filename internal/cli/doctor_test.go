@@ -26,6 +26,8 @@ func healthyFake() *execx.Fake {
 	f.SetPath("git", "/usr/bin/git")
 	f.SetPath("ldconfig", "/sbin/ldconfig")
 	f.On("docker", "version").Stdout(healthyDocker)
+	f.On("docker", "image", "inspect").Stdout("sha256:fake")
+	f.On("docker", "pull")
 	f.On("/sbin/ldconfig", "-p").Stdout("libicuuc.so.74 => /lib/libicuuc.so.74")
 	return f
 }

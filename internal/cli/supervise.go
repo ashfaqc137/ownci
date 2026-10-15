@@ -10,6 +10,8 @@ import (
 
 	"github.com/ashfaqc137/ownci/internal/buildinfo"
 	"github.com/ashfaqc137/ownci/internal/config"
+	"github.com/ashfaqc137/ownci/internal/hooks"
+	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
 	"github.com/spf13/cobra"
 )
@@ -18,10 +20,29 @@ import (
 var tuneSupervisor func(*supervisor.Options)
 
 // beforeLaunch runs before every launch of the runner (restarts included),
-// in the foreground command and in the detached supervisor alike.
-// t08: re-assert the isolation .env and run the cleanup here.
-func beforeLaunch(_ context.Context, _ *App, _ *config.Config) error {
-	return nil
+// in the foreground command and in the detached supervisor alike. It
+// re-asserts the isolation policy (a tampered or runner-rewritten .env, a
+// modified hook, a missing image are repaired), refuses to go on if it still
+// does not hold, and clears leftovers of a job that was cut short.
+func beforeLaunch(ctx context.Context, app *App, cfg *config.Config) error {
+	ex := newExecRunner(app.Logger)
+	dir := app.Paths.RunnerDir(cfg.Runner.Name)
+
+	fixed, err := isolation.Repair(ctx, ex, dir, hooks.CleanupImage)
+	for _, what := range fixed {
+		app.Logger.Warn("isolation repaired", "what", what)
+		fmt.Fprintf(app.Err, "ownci: %s\n", what)
+	}
+	if err != nil {
+		return err
+	}
+	if rep := isolation.Verify(ctx, ex, dir, hooks.CleanupImage); !rep.EnforcementOK() {
+		return &UserError{
+			Msg:  "isolation is not enforced, refusing to start: " + strings.Join(rep.Problems(), "; "),
+			Hint: "Run 'ownci setup --repo " + cfg.Runner.Repo + " --force' to reinstall it.",
+		}
+	}
+	return isolation.RunCleanup(ctx, ex, dir, hooks.CleanupImage)
 }
 
 // runSupervisor runs the supervisor for the configured runner until it stops
@@ -70,6 +91,9 @@ func failureError(name string, st supervisor.State, err error) error {
 func failureMessage(name string, st supervisor.State) string {
 	switch st.Phase {
 	case supervisor.PhaseCrashed:
+		if st.ExitCode == nil { // never got as far as running the runner
+			return fmt.Sprintf("the runner '%s' could not be started: %s", name, lastLine(st.LastError))
+		}
 		msg := fmt.Sprintf("the runner '%s' keeps crashing and was not restarted again", name)
 		if st.ExitCode != nil {
 			msg += fmt.Sprintf(" (last exit code %d)", *st.ExitCode)

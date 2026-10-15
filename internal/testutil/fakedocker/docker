@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Fake docker for tests (see ../fakedocker.go). Records each call's arguments
+# to $FAKE_DOCKER_LOG and answers just enough of the CLI for ownci.
+#
+#   FAKE_DOCKER_DIR      state dir; the file <dir>/image-present means the image exists
+#                        (unset: the image always exists)
+#   FAKE_DOCKER_PULL_FAIL=1   `docker pull` fails
+#   FAKE_DOCKER_RUN_FAIL=1    `docker run` fails
+if [ -n "${FAKE_DOCKER_LOG:-}" ]; then
+  printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+fi
+
+case "${1:-}" in
+  version)
+    echo '{"Client":{"Version":"27.0.3"},"Server":{"Version":"27.0.3","Os":"linux"}}'
+    ;;
+  pull)
+    if [ -n "${FAKE_DOCKER_PULL_FAIL:-}" ]; then
+      echo "Error response from daemon: pull access denied" >&2
+      exit 1
+    fi
+    [ -z "${FAKE_DOCKER_DIR:-}" ] || : > "$FAKE_DOCKER_DIR/image-present"
+    ;;
+  image)
+    if [ -n "${FAKE_DOCKER_DIR:-}" ] && [ ! -f "$FAKE_DOCKER_DIR/image-present" ]; then
+      echo "Error: No such image" >&2
+      exit 1
+    fi
+    echo "sha256:fake"
+    ;;
+  run)
+    if [ -n "${FAKE_DOCKER_RUN_FAIL:-}" ]; then
+      echo "docker: Error response from daemon: fake failure" >&2
+      exit 1
+    fi
+    shift
+    args=("$@")
+    src=""
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      if [ "${args[i]}" = "-v" ]; then src="${args[i + 1]%:/w}"; fi
+    done
+    # Emulate the container: run the `sh -c` script with /w mapped to the
+    # bind-mounted host directory.
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      if [ "${args[i]}" = "sh" ] && [ "${args[i + 1]:-}" = "-c" ]; then
+        script="${args[i + 2]//\/w/$src}"
+        exec sh -c "$script" "${args[@]:i + 3}"
+      fi
+    done
+    ;;
+  *)
+    echo "fake docker: unsupported: $*" >&2
+    exit 1
+    ;;
+esac

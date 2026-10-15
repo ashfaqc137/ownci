@@ -9,6 +9,7 @@ import (
 
 	"github.com/ashfaqc137/ownci/internal/docker"
 	"github.com/ashfaqc137/ownci/internal/execx"
+	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/platform"
 )
 
@@ -124,5 +125,26 @@ func GitCheck(r execx.Runner) Check {
 				Hint: "Install git if you want to debug checkouts on the host."}
 		}
 		return Result{Level: Pass, Detail: p}
+	}}
+}
+
+// IsolationCheck verifies the runner enforces the isolation policy: job
+// containers required, cleanup hook installed, cleanup image present.
+func IsolationCheck(r execx.Runner, runnerDir, image string) Check {
+	return Check{Name: "isolation", Run: func(ctx context.Context) Result {
+		rep := isolation.Verify(ctx, r, runnerDir, image)
+		switch {
+		case !rep.EnforcementOK():
+			return Result{Level: Fail, Detail: strings.Join(rep.Problems(), "; "),
+				Hint: "'ownci start' repairs this, or run 'ownci setup --force'."}
+		case !rep.CleanupImage.OK:
+			return Result{Level: Warn, Detail: rep.CleanupImage.Detail,
+				Hint: "docker pull " + image + " ('ownci start' also pulls it)."}
+		}
+		detail := "container jobs required, cleanup hook and image in place; last cleanup: " + rep.LastCleanup.Result
+		if rep.LastCleanup.Result == "failed" {
+			return Result{Level: Warn, Detail: detail, Hint: "The last per-job cleanup failed: " + rep.LastCleanup.Detail}
+		}
+		return Result{Level: Pass, Detail: detail}
 	}}
 }
