@@ -1,0 +1,11 @@
+# Expected: the job FAILS with "Jobs without a job container are forbidden on
+# this runner". The job deliberately declares no container.
+name: ownci-nocontainer
+on:
+  workflow_dispatch:
+
+jobs:
+  nocontainer:
+    runs-on: [ownci]
+    steps:
+      - run: echo "this must never run on the OwnCI runner"

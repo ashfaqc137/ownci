@@ -77,3 +77,30 @@ grep -ac OWNCI_DEV_ /tmp/ownci                                                  
 - [ ] The README states the trust model and isolation limitations honestly (PRD §10, §12 "Security and documentation").
 - [ ] Release artifacts + SHA256SUMS are produced and verified. There is no dev code in the release binaries.
 - [ ] Implementation notes + Next steps appended.
+
+## Implementation notes
+
+**What was done (offline) and what was not.** Everything that does not need real GitHub is implemented and tested. **The real-GitHub runbook (`docs/e2e.md`) has NOT been executed**: it needs a private sandbox repository, an admin token and a live PR, which only the user can provide (and creating repositories or pushing to GitHub is outward-facing, so it was not done on the user's behalf). `docs/acceptance.md` is therefore a copy of PRD §12 with **every box unchecked** and an explicit "NOT YET EXECUTED" banner. The task's Definition-of-done item "every runbook step passes on the author's WSL2 machine against real GitHub" is open.
+
+**Delivered**
+- `e2e/workflows/{ownci-pass,ownci-nocontainer,ownci-poison}.yml` (as specified) and `e2e/run.sh` (uses only `gh`; refuses public repos; commits the workflows to the *default branch* because `workflow_dispatch` workflows only exist from there; opens a PR from a throwaway branch; polls with `gh run view`; prints a PASS/FAIL table; exits non-zero on any FAIL). `bash -n` is clean; `shellcheck` is not installed here, so it was not run.
+- `e2e/workflows_test.go` (Go, stdlib only; PyYAML is not installed): each workflow targets exactly `runs-on: [ownci]` once per job, only the no-container workflow lacks a job `container:`, no tabs, expected triggers/keys; `run.sh` is executable and has the guards.
+- `docs/e2e.md` (12 steps with expected output, checklist mapped to PRD §12, Findings template incl. the hook-timing and `_work`-wipe questions from t08), `docs/releasing.md`, `docs/acceptance.md`, `README.md` (all sections of the spec; the trust-model section uses t08's six-item gap list; license is a TODO placeholder — no license was chosen, the user must decide).
+- `make release VERSION=v0.1.0 [ALLOW_DIRTY=1]` → `tools/release.sh`: version format check, dirty-tree refusal (tracked changes only; the untracked `plan.md` does not block), `CGO_ENABLED=0 -trimpath` builds for linux/amd64 and linux/arm64, `grep -a OWNCI_DEV` guard (fails the build), deterministic tar.gz (binary, README.md, LICENSE if present at the archive top level), `dist/SHA256SUMS`. Verified by hand: `sha256sum -c SHA256SUMS` OK; the amd64 binary prints `ownci v0.1.0 (commit 30a9bf4, built …)`, no `build: dev` line, and `grep -ac OWNCI_DEV` → 0; a bad VERSION and a dirty tree are refused.
+- `cmd/ownci/release_test.go`: builds the binary with and without `-tags dev` and asserts that only the dev binary contains `OWNCI_DEV_` (the control makes the check non-vacuous).
+
+**A real defect found and fixed by that test:** the release binary still contained the string `OWNCI_DEV_`, from the dev-warning scanner in `internal/cli/devwarn.go` (compiled into release builds though it only acts when `DevBuild`). It is now split into `devwarn_dev.go` (`//go:build dev`) and `devwarn_release.go` (a no-op); `TestDevWarning` moved to `devwarn_dev_test.go` (`//go:build dev`), and `make test` runs it with `go test -tags dev -run TestDevWarning ./internal/cli/` (the rest of the cli tests assume a release build, e.g. `TestVersion`).
+
+**Verification run (2026-10-15):** `make check` green; `make release VERSION=v0.1.0 ALLOW_DIRTY=1` as above.
+
+**Next steps (post-MVP candidates)**
+1. Run `docs/e2e.md` for real, fill `docs/acceptance.md`, resolve the t08→t10 open items (hook timing, `_work` wipe), pick a license, then tag `v0.1.0` (`docs/releasing.md`).
+2. Ephemeral/JIT runner registration (fresh runner per job).
+3. A systemd *user* service (and auto-start) for WSL with systemd / native Linux.
+4. Native Linux validation pass (PRD phase 2), including arm64 on real hardware.
+5. Rootless Docker / userns-remap so "root in the container" stops being host-root-equivalent on bind mounts.
+6. Resource limits and concurrency (CPU/memory/disk caps; more than one job at a time).
+7. Network policy for job containers; restricting `services:`/`docker://` sibling containers.
+8. CI for this repository (`make check` on push, `shellcheck`, release workflow), archive signing/attestation, package managers.
+9. Windows and macOS phases (PRD 3–4), which need an explicit runner/execution-model decision.
+10. F1 in `tasks/future.md` (user-supplied runner archive/URL); don't create the data-dir layout inside foreign directories (t09 note); log rotation.

@@ -16,7 +16,7 @@
 | t07 | `start` / `stop` / `status` | ✅ | – | – | |
 | t08 | Isolation enforcement + cleanup hook | ✅ | – | – | |
 | t09 | `uninstall` / `logs` | ✅ | – | – | |
-| t10 | Real E2E, docs, release | – | – | – | |
+| t10 | Real E2E, docs, release | ⚠️ | – | – | Offline parts done (assets, docs, README, `make release`). **Real-GitHub runbook not executed**; `docs/acceptance.md` is all unchecked. |
 
 Legend: – not started · 🚧 in progress · ✅ done · ⚠️ done with caveats (see Notes)
 
@@ -35,6 +35,7 @@ Post-release ideas are collected in [`future.md`](future.md).
 - [ ] (t08 → t10) Verify on real GitHub: the job-completed hook timing relative to the job-container stop
 - [ ] (t08 → t10) Verify on real GitHub: wiping `_work` (except `_temp`, `_PipelineMapping`) doesn't break the runner
 - [ ] (t09 → future) `setupApp` creates the layout dirs even in a foreign non-empty `--data-dir` (also for `uninstall`); consider not creating them for read-only/uninstall commands (see t09 notes)
+- [ ] (t10 → user) Execute `docs/e2e.md` against a private sandbox repo (needs `OWNCI_E2E_REPO`, an admin token, Docker) and record the evidence in `docs/acceptance.md`; fill the Findings table
 - [ ] (t10) Decide on a license (README placeholder until then)
 
 ## Decision changes

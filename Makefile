@@ -2,7 +2,7 @@ LDFLAGS := -X github.com/ashfaqc137/ownci/internal/buildinfo.Version=$(shell git
 	-X github.com/ashfaqc137/ownci/internal/buildinfo.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none) \
 	-X github.com/ashfaqc137/ownci/internal/buildinfo.Date=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: build build-dev test vet fmt fmtcheck check clean
+.PHONY: build build-dev test vet fmt fmtcheck check clean release
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ownci ./cmd/ownci
@@ -13,6 +13,7 @@ build-dev:
 test:
 	go test -race ./...
 	go test -tags dev ./internal/buildinfo/ ./internal/runner/ ./internal/github/
+	go test -tags dev -run TestDevWarning ./internal/cli/
 
 vet:
 	go vet ./...
@@ -28,3 +29,7 @@ check: fmtcheck vet test build build-dev
 
 clean:
 	rm -rf bin/ dist/
+
+# make release VERSION=v0.1.0 [ALLOW_DIRTY=1]: archives + SHA256SUMS in dist/.
+release:
+	VERSION='$(VERSION)' ALLOW_DIRTY='$(ALLOW_DIRTY)' ./tools/release.sh

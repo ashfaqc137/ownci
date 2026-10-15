@@ -1,0 +1,23 @@
+# Expected: green. Proves a PR check runs on the OwnCI runner, inside a container.
+name: ownci-pass
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pass:
+    runs-on: [ownci]
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Where is this running?
+        run: |
+          uname -a
+          cat /etc/os-release
+          hostname
+          nproc
+          echo "runner=$RUNNER_NAME"
+
+      - name: Inside a container?
+        run: test -f /.dockerenv || grep -qE 'docker|containerd' /proc/1/cgroup

@@ -1,0 +1,43 @@
+# Expected: green. `first` plants marker files where a job could poison the next
+# one; the job-completed hook must have wiped them before `second` starts.
+name: ownci-poison
+on:
+  workflow_dispatch:
+
+jobs:
+  first:
+    runs-on: [ownci]
+    container: ubuntu:24.04
+    steps:
+      - name: Plant markers
+        run: |
+          set -eu
+          # Inside the job container these are bind mounts of the runner's _work.
+          mkdir -p "$RUNNER_TOOL_CACHE/poison"
+          touch "$RUNNER_TOOL_CACHE/poison/marker"
+          mkdir -p "$GITHUB_WORKSPACE/../poison"
+          touch "$GITHUB_WORKSPACE/../poison/marker"
+          actions_dir="$(cd "$RUNNER_WORKSPACE/.." && pwd)/_actions"
+          echo "action cache dir: $actions_dir"
+          mkdir -p "$actions_dir/poison"
+          touch "$actions_dir/poison/marker"
+          ls -ld "$RUNNER_TOOL_CACHE/poison" "$GITHUB_WORKSPACE/../poison" "$actions_dir/poison"
+
+  second:
+    needs: first
+    runs-on: [ownci]
+    container: ubuntu:24.04
+    steps:
+      - name: Assert the markers are gone
+        run: |
+          fail=0
+          actions_dir="$(cd "$RUNNER_WORKSPACE/.." && pwd)/_actions"
+          for p in "$RUNNER_TOOL_CACHE/poison" "$GITHUB_WORKSPACE/../poison" "$actions_dir/poison"; do
+            if [ -e "$p" ]; then
+              echo "LEFTOVER FROM THE PREVIOUS JOB: $p"
+              fail=1
+            else
+              echo "ok, absent: $p"
+            fi
+          done
+          exit "$fail"
