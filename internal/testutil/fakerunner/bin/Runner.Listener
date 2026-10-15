@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fake of actions/runner bin/Runner.Listener (see ../../fakerunner.go).
+VERSION="__FAKE_VERSION__"
+if [ "${1:-}" = "--version" ]; then
+  echo "$VERSION"
+  exit 0
+fi
+exit 1

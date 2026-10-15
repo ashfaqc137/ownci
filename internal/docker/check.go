@@ -17,7 +17,8 @@ import (
 // it to a UserError (this package must not import cli).
 type Error struct{ Msg, Hint string }
 
-func (e *Error) Error() string { return e.Msg }
+func (e *Error) Error() string    { return e.Msg }
+func (e *Error) UserHint() string { return e.Hint }
 
 // Status is the result of Check.
 type Status struct {

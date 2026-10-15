@@ -40,6 +40,7 @@ func newRoot() (*cobra.Command, *rootFlags) {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			printDevWarning(cmd.ErrOrStderr())
 			// `version` needs no data dir, unless the user asks for verbose
 			// logging into an explicit one (handy for checking the layout).
 			if cmd.Annotations[skipAppAnnotation] == "true" && !(f.verbose && f.dataDir != "") {

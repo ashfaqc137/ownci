@@ -146,3 +146,35 @@ OWNCI_DEV_RUNNER_SHA256=00000000000000000000000000000000000000000000000000000000
 - [ ] The archive is never extracted before its checksum is verified.
 - [ ] The fake runner implements the full behavior contract above (later tasks rely on it).
 - [ ] Implementation notes: pinned version/date, exported API signatures, the fake runner controls (`.fake-job-request`, `FAKE_RUNNER_EXIT_CODE`).
+
+## Implementation notes
+
+**Pinned runner**: `2.338.0`, pinned **2026-10-15** (release published 2026-10-06). SHA256 from the release notes: `linux-x64 af4b794c1bc41d73d40535e3fe092a39f9679cd8d965954c2aca25a05ca41d32`, `linux-arm64 628b4a7258487b80c1d3c221095a7ded349f5ae0175fd3dfab708d07428f041b`. The x64 value was confirmed by a real download (see verification).
+
+**Deviations**
+- `runner.Error{Msg, Hint, Err}` (with `UserHint()`, `Unwrap()`) replaces `UserError` inside `internal/runner`, which cannot import `cli`. `cli.renderError` now prints `Hint:` for any error implementing `UserHint() string` (a `hinted` interface; `docker.Error` got `UserHint()` too). Exit code 1.
+- `Install` downloads **before** it removes an existing dir (with `--force`), so a failed download never destroys a working install. A registered dir (`.runner` present) is refused even with `--force`.
+- Added `runner.ValidateName` (`^[a-z0-9][a-z0-9-]{0,63}$`) and `runner.DefaultName(hostname)`. The name becomes a directory/file name, so this doubles as a path-traversal guard; `Install` validates it.
+- `Fetch` refuses an `Asset` with an empty SHA256. Progress prints `Downloading <file> (<MB> MB)… done` (or `failed`).
+- `Extract`: implicit parent dirs are created `0755`; entries whose name already exists are removed first (duplicates and "symlink then file" never write through a link); `TypeRegA` is accepted; PAX global headers are skipped; the `./` root entry is skipped.
+- A symlink is rejected if its target resolves **lexically** outside the root; writes are additionally confined by `os.Root`.
+- Release builds contain no override code (`override_release.go` is a no-op; a test asserts the env vars are ignored). `make test` now also runs `go test -tags dev ./internal/buildinfo/ ./internal/runner/`.
+- The dev-warning code is in `internal/cli/devwarn.go` (`devWarning(devBuild, environ)` is pure and unit-tested; `printDevWarning(w)` is called from the root pre-run). t05 reuses it.
+- `shellcheck` is not installed on this machine, so the fake scripts were only checked with `bash -n`.
+- `FAKE_RUNNER_EXIT_CODE` exits right after the `Connected`/`Current runner version` lines, **before** `Listening for Jobs`.
+
+**API for later tasks**
+- `runner.Asset{Arch, URL, SHA256, Version}`, `runner.Release`, `runner.Pinned`, `runner.AssetFor(arch) (Asset, error)`.
+- `runner.Fetch(ctx, FetchOptions{Asset, CacheDir, HTTP, Progress, Logger}) (archivePath string, err error)`, `runner.ErrChecksumMismatch`.
+- `runner.Extract(archivePath, dest string) error`.
+- `runner.Install(ctx, InstallOptions{Paths, Name, Asset, Exec, HTTP, Force, Progress, Logger}) (InstallResult{Dir, ArchivePath, ExpectedVersion, InstalledVersion, VersionErr}, error)`, `runner.InstalledVersion(ctx, exec, dir) (string, error)`.
+- `runner.ValidateName(name) error`, `runner.DefaultName(hostname) string`.
+- cli test seams: `assetFor`, `newHTTPClient` (alongside `newExecRunner`, `geteuid`); `setup_test.go` has `useFakeRunnerServer`.
+- `testutil.FakeRunnerTarball(FakeRunnerOptions{Version}) (data []byte, sha256hex string)` (deterministic, entries prefixed `./`), `testutil.WriteFakeRunner(t, dir, opts...)`. Default version `2.999.0-fake`.
+- **Fake runner controls**: `.fake-job-request` in the runner dir containing `<job> [nocontainer]` simulates one job (`Running job` → markers in `_work/{_tool,_actions,fakerepo/fakerepo,_temp}` → runs `ACTIONS_RUNNER_HOOK_JOB_COMPLETED` with `RUNNER_ROOT` and `GITHUB_WORKSPACE` → `Job <n> completed with result: Succeeded|Failed`; job output in `_diag/fake-job-<n>.log`). `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true` + `nocontainer` → `Failed` with the real error text. `FAKE_RUNNER_EXIT_CODE=N` (env or `.env`) → exit N. `.env` is loaded like the Listener (split on first `=`, CRLF tolerated). `config.sh` records its args (token masked) in `.fake-config-args`; with `OWNCI_DEV_GITHUB_API_URL` set it POSTs `{token,name,labels[],url}` to `<api>/_fake/register` and DELETEs `<api>/_fake/register/<name>?token=T` on remove (exercised in t05/t06).
+
+**Known limitations**
+- The registration/remove API paths in the fake scripts are not exercised until t05/t06.
+- The `0755` mode of extracted implicit dirs is subject to the process umask.
+
+**Verification run**: `make check` passes. With the real runner: `./bin/ownci --data-dir /tmp/ownci-t04 setup --download-only --name t04` → `Runner 2.338.0 (linux-x64) verified and installed at /tmp/ownci-t04/runners/t04`; `Runner.Listener --version` → `2.338.0`; cache holds the 217 MB archive (`0600`); a second run → `already exists` + `--force` hint (exit 1); after appending a byte to the cached archive, `--force` re-downloads and `ownci.log` has `checksum mismatch in cached runner archive, re-downloading`. `bin/ownci-dev` with the real URL and an all-zero SHA → `DEV BUILD: overrides active`, checksum-mismatch error with hint, nothing extracted into `runners/t04dev` (the stale cache file with the same name was deleted); URL without SHA → refused.

@@ -24,6 +24,10 @@ type UserError struct {
 
 func (e *UserError) Error() string { return e.Msg }
 
+// hinted is implemented by errors from other packages (docker.Error,
+// runner.Error) that carry an actionable hint, since they cannot import cli.
+type hinted interface{ UserHint() string }
+
 // exitError ends the process with Code without printing anything; the command
 // has already reported the problem itself (e.g. doctor's FAIL lines).
 type exitError struct{ Code int }
@@ -59,6 +63,13 @@ func renderError(w io.Writer, err error) int {
 		return exitFailure
 	}
 	fmt.Fprintf(w, "Error: %s\n", err)
+	var h hinted
+	if errors.As(err, &h) {
+		if hint := h.UserHint(); hint != "" {
+			fmt.Fprintf(w, "Hint: %s\n", hint)
+		}
+		return exitFailure
+	}
 	if isUsageError(err) {
 		return exitUsage
 	}

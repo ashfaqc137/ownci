@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 
@@ -17,6 +18,8 @@ import (
 var (
 	newExecRunner = func(l *slog.Logger) execx.Runner { return execx.NewOS(l) }
 	geteuid       = os.Geteuid
+	// newHTTPClient returns nil to let packages use their own default client.
+	newHTTPClient = func() *http.Client { return nil }
 )
 
 func newDoctorCmd() *cobra.Command {

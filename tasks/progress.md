@@ -10,7 +10,7 @@
 | t01 | Scaffolding, CLI skeleton, build tooling | ✅ | – | – | |
 | t02 | Platform, data dir & config, logging | ✅ | – | – | |
 | t03 | Exec seam, Docker checks, `doctor` | ✅ | – | – | |
-| t04 | Runner download, verify, extract, fake runner | – | – | – | |
+| t04 | Runner download, verify, extract, fake runner | ✅ | – | – | |
 | t05 | GitHub client, `tools/fakegh` | – | – | – | |
 | t06 | `setup` | – | – | – | |
 | t07 | `start` / `stop` / `status` | – | – | – | |
@@ -19,6 +19,8 @@
 | t10 | Real E2E, docs, release | – | – | – | |
 
 Legend: – not started · 🚧 in progress · ✅ done · ⚠️ done with caveats (see Notes)
+
+Post-release ideas are collected in [`future.md`](future.md).
 
 ## Open items (cross-task)
 
@@ -41,5 +43,5 @@ Legend: – not started · 🚧 in progress · ✅ done · ⚠️ done with cave
 <!-- Machine facts that matter to later tasks. -->
 - Dev machine: WSL2 (kernel 6.18, `microsoft-standard-WSL2`), Go 1.27.2, `gh` installed.
 - Docker: Docker Desktop on Windows; WSL integration **off** as of 2026-10-14.
-- Pinned runner version: _(set in t04)_
+- Pinned runner version: 2.338.0 (pinned 2026-10-15)
 - Cleanup image digest: _(set in t08)_
