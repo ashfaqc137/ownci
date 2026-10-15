@@ -56,23 +56,6 @@ func TestVersionJSON(t *testing.T) {
 	}
 }
 
-func TestStubsNotImplemented(t *testing.T) {
-	for _, name := range []string{"logs", "uninstall"} {
-		t.Run(name, func(t *testing.T) {
-			_, stderr, code := runCLI(t, name)
-			if code != 2 {
-				t.Fatalf("exit = %d, want 2", code)
-			}
-			if !strings.Contains(stderr, "not implemented") {
-				t.Fatalf("stderr = %q", stderr)
-			}
-			if !strings.Contains(stderr, "Hint:") {
-				t.Fatalf("missing hint: %q", stderr)
-			}
-		})
-	}
-}
-
 func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{{"frobnicate"}, {"version", "--bogus"}} {
 		_, stderr, code := runCLI(t, args...)

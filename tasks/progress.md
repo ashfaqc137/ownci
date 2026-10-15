@@ -15,7 +15,7 @@
 | t06 | `setup` | ✅ | – | – | |
 | t07 | `start` / `stop` / `status` | ✅ | – | – | |
 | t08 | Isolation enforcement + cleanup hook | ✅ | – | – | |
-| t09 | `uninstall` / `logs` | – | – | – | |
+| t09 | `uninstall` / `logs` | ✅ | – | – | |
 | t10 | Real E2E, docs, release | – | – | – | |
 
 Legend: – not started · 🚧 in progress · ✅ done · ⚠️ done with caveats (see Notes)
@@ -29,11 +29,12 @@ Post-release ideas are collected in [`future.md`](future.md).
 - [x] (t06 → t07) `setup --force` must refuse while the runner is running — resolved in t07 (`detectExisting` checks `supervisor.IsRunning`)
 - [x] (t06 → t08) Implement `installIsolation` in `internal/setup/setup.go` — resolved in t08 (`isolation.Install`)
 - [x] (t07 → t08) Fill `beforeLaunch` — resolved in t08 (Repair → Verify → RunCleanup; status Isolation line added). Original item: fill `beforeLaunch` in `internal/cli/supervise.go` (re-assert `.env`, run cleanup) and add an isolation section to `statusReport`/`renderStatus` in `internal/cli/status.go`
-- [ ] (t07 → t09) Use `supervisor.IsRunning` / `supervisor.Stop` (`ErrNotRunning`) in uninstall; `logs` can tail `logs/runner-<name>.log` and `logs/supervisor-<name>.log`
+- [x] (t07 → t09) Resolved in t09. Use `supervisor.IsRunning` / `supervisor.Stop` (`ErrNotRunning`) in uninstall; `logs` can tail `logs/runner-<name>.log` and `logs/supervisor-<name>.log`
 - [ ] (t08 → t10) Document the remaining isolation gaps in the README: the six-item list in `tasks/t08-isolation-cleanup.md` Implementation notes (network, sibling containers, shared daemon, root in the job container, host-run runner/hook, hook timing/resource limits)
-- [ ] (t08 → t09) `--purge` must delete root-owned files in `_work` with a cleanup container (`hooks.CleanupImage`, same flags as the hook but removing everything); the hook script keeps `_temp`/`_PipelineMapping`, so it is not enough on its own
+- [x] (t08 → t09) Resolved in t09 (`internal/uninstall/purge.go`). `--purge` must delete root-owned files in `_work` with a cleanup container (`hooks.CleanupImage`, same flags as the hook but removing everything); the hook script keeps `_temp`/`_PipelineMapping`, so it is not enough on its own
 - [ ] (t08 → t10) Verify on real GitHub: the job-completed hook timing relative to the job-container stop
 - [ ] (t08 → t10) Verify on real GitHub: wiping `_work` (except `_temp`, `_PipelineMapping`) doesn't break the runner
+- [ ] (t09 → future) `setupApp` creates the layout dirs even in a foreign non-empty `--data-dir` (also for `uninstall`); consider not creating them for read-only/uninstall commands (see t09 notes)
 - [ ] (t10) Decide on a license (README placeholder until then)
 
 ## Decision changes

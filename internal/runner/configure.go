@@ -80,3 +80,26 @@ func tailLines(res execx.Result, n int) string {
 	}
 	return logging.Redact(strings.Join(lines, "\n"))
 }
+
+// Remove unregisters the runner in dir by running `./config.sh remove`. The
+// removal token is single-use and never logged. On failure the error carries
+// the last 20 lines of the (redacted) output.
+func Remove(ctx context.Context, ex execx.Runner, dir, token string) error {
+	logging.RegisterSecret(token)
+	res, err := ex.Run(ctx, execx.Cmd{
+		Name: filepath.Join(dir, "config.sh"),
+		Args: []string{"remove", "--token", token},
+		Dir:  dir,
+	})
+	if err != nil {
+		return &Error{Msg: fmt.Sprintf("could not run config.sh remove: %v", err), Err: err,
+			Hint: "Check that " + dir + " is intact."}
+	}
+	if res.ExitCode != 0 {
+		return &Error{
+			Msg:  fmt.Sprintf("config.sh remove failed (exit %d):\n%s", res.ExitCode, tailLines(res, 20)),
+			Hint: "The registration can also be removed on GitHub (repository Settings → Actions → Runners).",
+		}
+	}
+	return nil
+}
