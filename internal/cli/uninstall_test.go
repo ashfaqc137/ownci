@@ -108,6 +108,25 @@ func TestUninstallPurgeRefusesAForeignDirectory(t *testing.T) {
 	}
 }
 
+// uninstall on a foreign directory must not create the layout (or a log file)
+// there, not even when it refuses.
+func TestUninstallLeavesAForeignDirectoryUntouched(t *testing.T) {
+	useFake(t, healthyFake())
+	dir := filepath.Join(t.TempDir(), "not-ownci")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "important"), []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"uninstall", "--yes"}, {"uninstall", "--purge", "--yes"}} {
+		runCLI(t, append([]string{"--data-dir", dir}, args...)...)
+		if got := entriesOf(dir); len(got) != 1 || got[0] != "important" {
+			t.Fatalf("%v changed the foreign directory: %v", args, got)
+		}
+	}
+}
+
 func TestUninstallNothingToDo(t *testing.T) {
 	useFake(t, healthyFake())
 	dir := filepath.Join(t.TempDir(), "empty")

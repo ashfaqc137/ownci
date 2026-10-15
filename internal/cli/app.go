@@ -19,6 +19,20 @@ import (
 // skipAppAnnotation marks commands that must work without a data directory.
 const skipAppAnnotation = "skipApp"
 
+// noLayoutAnnotation marks commands that must not create OwnCI's directory
+// layout inside a non-empty directory that OwnCI did not create.
+const noLayoutAnnotation = "noLayout"
+
+// foreignNonEmpty reports whether the root is an existing, non-empty directory
+// without OwnCI's marker.
+func foreignNonEmpty(p config.Paths) bool {
+	if !p.Foreign() {
+		return false
+	}
+	entries, err := os.ReadDir(p.Root)
+	return err == nil && len(entries) > 0
+}
+
 // App is the per-invocation state shared by all commands. It is built in the
 // root's PersistentPreRunE; commands take what they need from it.
 type App struct {
@@ -54,8 +68,14 @@ func setupApp(cmd *cobra.Command, f *rootFlags) (*App, io.Closer, error) {
 	}
 
 	paths := config.NewPaths(root)
+	// A command that only removes things must not litter a directory that is
+	// not OwnCI's: skip the layout (and the log file inside it) there.
+	untouched := cmd.Annotations[noLayoutAnnotation] == "true" && foreignNonEmpty(paths)
+	logFile := paths.OwnciLog
 	var notes []string
-	if err := paths.EnsureNotify(func(m string) { notes = append(notes, m) }); err != nil {
+	if untouched {
+		logFile = os.DevNull
+	} else if err := paths.EnsureNotify(func(m string) { notes = append(notes, m) }); err != nil {
 		return nil, nil, &UserError{
 			Msg:  fmt.Sprintf("preparing data directory %s: %v", root, err),
 			Hint: "Check that the directory is writable, or choose another with --data-dir.",
@@ -63,7 +83,7 @@ func setupApp(cmd *cobra.Command, f *rootFlags) (*App, io.Closer, error) {
 	}
 
 	logger, closer, err := logging.Setup(logging.Options{
-		LogFile: paths.OwnciLog,
+		LogFile: logFile,
 		Verbose: f.verbose,
 		Stderr:  cmd.ErrOrStderr(),
 	})

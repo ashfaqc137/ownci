@@ -141,6 +141,9 @@ func (s *supervisor) loop(ctx context.Context) (State, error) {
 				return t.snapshot(), err
 			}
 		}
+		if pids := killOrphans(s.dir); len(pids) > 0 {
+			t.notice(fmt.Sprintf("stopped %d leftover runner process(es) from an earlier run: %v", len(pids), pids))
+		}
 		exit, stopped := s.runOnce(ctx)
 		code := exit
 		switch {

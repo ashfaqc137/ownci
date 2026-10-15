@@ -493,3 +493,44 @@ func TestLastLines(t *testing.T) {
 		t.Errorf("len = %d", len(got))
 	}
 }
+
+// A runner left behind by a SIGKILLed supervisor must be cleaned up before the
+// next launch; processes outside the runner directory must be left alone.
+func TestRunKillsLeftoverRunnerProcesses(t *testing.T) {
+	r := newRig(t)
+	spawn := func(script string) *exec.Cmd {
+		t.Helper()
+		if err := os.WriteFile(script, []byte("#!/bin/bash\nwhile :; do sleep 0.2; done\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(script)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
+		return cmd
+	}
+	orphan := spawn(filepath.Join(r.dir, "orphan-listener.sh"))
+	bystander := spawn(filepath.Join(t.TempDir(), "bystander.sh"))
+	orphanDone := make(chan struct{})
+	go func() { _ = orphan.Wait(); close(orphanDone) }()
+
+	run := r.start(r.opts())
+	r.waitPhase(PhaseListening)
+
+	select {
+	case <-orphanDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("leftover runner process was not killed")
+	}
+	if err := syscall.Kill(bystander.Process.Pid, 0); err != nil {
+		t.Errorf("process outside the runner directory was signalled: %v", err)
+	}
+	log, _ := os.ReadFile(r.paths.RunnerLog(testName))
+	if !strings.Contains(string(log), "leftover runner process") {
+		t.Errorf("runner log has no notice about the leftover process:\n%s", log)
+	}
+	run.sigs <- syscall.SIGTERM
+	run.wait(t)
+}

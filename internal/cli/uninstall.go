@@ -22,8 +22,9 @@ var stdinIsTerminal = func() bool {
 func newUninstallCmd() *cobra.Command {
 	var o uninstall.Options
 	cmd := &cobra.Command{
-		Use:   "uninstall",
-		Short: "Stop the runner and safely remove OwnCI-managed files",
+		Use:         "uninstall",
+		Annotations: map[string]string{noLayoutAnnotation: "true"},
+		Short:       "Stop the runner and safely remove OwnCI-managed files",
 		Long: `Stop the runner and, on request, remove it.
 
 Plain 'ownci uninstall' only stops the runner and explains what is left.
