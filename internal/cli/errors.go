@@ -1,0 +1,72 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+// Exit codes (00-context §5).
+const (
+	exitOK        = 0
+	exitFailure   = 1
+	exitUsage     = 2
+	exitDoctorBad = 3 // used by doctor (t03)
+)
+
+// UserError is a failure the user can act on. Hint is optional.
+type UserError struct {
+	Msg  string
+	Hint string
+	Code int
+}
+
+func (e *UserError) Error() string { return e.Msg }
+
+// ErrNotImplemented is returned by commands that are still stubs.
+var ErrNotImplemented = &UserError{
+	Msg:  "not implemented",
+	Hint: "This command is not implemented yet.",
+	Code: exitUsage,
+}
+
+// renderError prints err to w as "Error: ..." (+ "Hint: ...") and returns the
+// process exit code. Shared by Execute and the tests.
+func renderError(w io.Writer, err error) int {
+	if err == nil {
+		return exitOK
+	}
+	var ue *UserError
+	if errors.As(err, &ue) {
+		fmt.Fprintf(w, "Error: %s\n", ue.Msg)
+		if ue.Hint != "" {
+			fmt.Fprintf(w, "Hint: %s\n", ue.Hint)
+		}
+		if ue.Code != 0 {
+			return ue.Code
+		}
+		return exitFailure
+	}
+	fmt.Fprintf(w, "Error: %s\n", err)
+	if isUsageError(err) {
+		return exitUsage
+	}
+	return exitFailure
+}
+
+// isUsageError recognises cobra's plain-string usage errors (unknown
+// command/flag, bad flag value, missing flag argument).
+func isUsageError(err error) bool {
+	msg := err.Error()
+	for _, p := range []string{
+		"unknown command", "unknown flag", "unknown shorthand flag",
+		"flag needs an argument", "invalid argument", "required flag",
+		"accepts ", "requires at least", "requires at most",
+	} {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}
