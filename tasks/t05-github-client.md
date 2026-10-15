@@ -107,3 +107,30 @@ kill %1
 - [ ] No token appears in any error string or log in tests (assert explicitly).
 - [ ] fakegh is usable both as `go run ./tools/fakegh` and as `httptest` in tests.
 - [ ] Implementation notes: client API, fakegh flags/endpoints, how to start fakegh for later tasks' manual flows.
+
+## Implementation notes
+
+**Client (`internal/github`)**: exactly the spec'd API. Deviations/additions worth knowing:
+- `Option`s: `WithBaseURL`, `WithHTTPClient`, `WithLogger`, plus `WithTokenSource(src)` so a 401 can say which token (`$GITHUB_TOKEN` / `$GH_TOKEN` / `gh`) was rejected. t06 should pass the `TokenSource` returned by `ResolveToken`.
+- `NewClient` and `ResolveToken` both call `logging.RegisterSecret`; `RegistrationToken`/`RemoveToken` register the tokens they return. Error text is built only from status, GitHub's `message` (run through `logging.Redact`) and static strings.
+- Errors: `*github.Error{Msg, Hint, Err}` (ParseRepo, ResolveToken, network failures) and `*github.APIError{Status, Message, DocURL}` (non-2xx). Both implement `UserHint()`, so the existing cli `hinted` path renders "Error:/Hint:" with no cli changes. Use `errors.As(err, &apiErr)` and check `Status` to branch (e.g. 404 on DeleteRunner).
+- 403 + `X-RateLimit-Remaining: 0` → rate-limit message (hint shows the reset time); any other 403 → "admin access to <repo> is required".
+- `ListRunners` always requests `per_page=100` and stops at the first short page.
+- Dev overrides: `override_dev.go` / `override_release.go` (`devAPIURL`, `devWebURL`). `APIBaseURL()` is the default base for `NewClient`; `WebBaseURL()` is for t06 to build the repo URL passed to `config.sh --url` (note: `http://127.0.0.1:8787/web/owner/name` under fakegh).
+- `make test` now also runs `-tags dev` for `./internal/github/`.
+
+**fakegh (`internal/testutil/fakegh`)**: `fakegh.New(Options) *Server` (panics on a bad state file) or `fakegh.Open(Options) (*Server, error)`; `*Server` is an `http.Handler`. `Options{PublicRepos, NoAdmin, StatePath, WebURL, Now}`. Test helpers: `AddRunner(repo, name, labels...)`, `Snapshot() State`, `RunnerSHA256()`, `fakegh.EnvLines(base)`.
+- Endpoints: `GET /repos/{o}/{r}`, `POST …/actions/runners/{registration,remove}-token`, `GET …/actions/runners` (`page`/`per_page`, max 100), `DELETE …/actions/runners/{id}`, `POST /_fake/register`, `DELETE /_fake/register/{name}?token=`, `GET /_fake/runner.tar.gz`, `GET /_fake/state`, `GET /web/…` (stub page).
+- Auth: non-empty `Bearer`, `bad-token` → 401. A `--no-admin` repo returns 403 on both token endpoints (as real GitHub does without admin).
+- Registering a name that already exists replaces it (config.sh doesn't tell fakegh about `--replace`). Tokens are single-use and tied to their repo; a registration token cannot remove and vice versa. State (runners, tokens, next id) is persisted atomically to `--state` on every change.
+- The fake tarball (`testutil.FakeRunnerTarball`, version `9.9.9-fake`) was already deterministic from t04, so no change was needed; a test asserts the served bytes match the advertised SHA256.
+
+**Starting fakegh for manual flows (t06+)**:
+```bash
+go run ./tools/fakegh --state /tmp/fakegh.json &      # also: --public-repos o/r,… --no-admin o/r,… --addr host:port
+eval "$(go run ./tools/fakegh --print-env)"            # 5 OWNCI_DEV_* vars + GITHUB_TOKEN=fake-token
+make build-dev && ./bin/ownci-dev …                    # only the dev build honors the overrides
+```
+`--print-env` assumes the same `--addr` (default `127.0.0.1:8787`); pass it to both invocations if you change it. Stop with `kill %1` (or Ctrl-C in the foreground).
+
+**Verification run (2026-10-15)**: `make check` green (incl. `-tags dev`); the spec's manual curl flow gave private/admin true, public `private:false`, a `FAKE-REG-…` token, 401 for `bad-token`, and the served tarball SHA equal to `OWNCI_DEV_RUNNER_SHA256`. The config.sh end-to-end test runs when `curl` and `bash` are present.

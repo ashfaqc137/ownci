@@ -11,7 +11,7 @@
 | t02 | Platform, data dir & config, logging | ✅ | – | – | |
 | t03 | Exec seam, Docker checks, `doctor` | ✅ | – | – | |
 | t04 | Runner download, verify, extract, fake runner | ✅ | – | – | |
-| t05 | GitHub client, `tools/fakegh` | – | – | – | |
+| t05 | GitHub client, `tools/fakegh` | ✅ | – | – | |
 | t06 | `setup` | – | – | – | |
 | t07 | `start` / `stop` / `status` | – | – | – | |
 | t08 | Isolation enforcement + cleanup hook | – | – | – | |

@@ -12,7 +12,7 @@ build-dev:
 
 test:
 	go test -race ./...
-	go test -tags dev ./internal/buildinfo/ ./internal/runner/
+	go test -tags dev ./internal/buildinfo/ ./internal/runner/ ./internal/github/
 
 vet:
 	go vet ./...
