@@ -89,6 +89,31 @@ jobs:
 
 Stop contributing compute with `ownci stop`; `ownci start` brings the same registration back.
 
+### One workflow file for a whole team
+
+Give each developer's runner their own label (their GitHub username) and let the workflow
+pick the runner of whoever triggered it, so everyone's jobs run on their own machine:
+
+```bash
+ownci setup --repo owner/name --labels <your-github-username>   # each developer, once
+```
+
+```yaml
+jobs:
+  build:
+    runs-on: [ownci, "${{ github.actor }}"]   # the user who opened or pushed to the PR
+    container: node:22
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+```
+
+Things to know: a developer whose runner is offline gets a queued job (it waits for their
+runner, it never lands on someone else's); bots such as Dependabot match no runner; and each
+developer needs admin access to the repository to run `ownci setup`. Use
+`github.event.pull_request.user.login` instead of `github.actor` if you want the PR *author*
+rather than whoever pushed last.
+
 ## Commands
 
 | Command | What it does |
@@ -186,7 +211,7 @@ Start with `ownci doctor` and `ownci status`. Logs: `ownci logs`, `ownci logs --
 | status phase **`version_deprecated`** | The runner could not self-update: upgrade ownci, then `ownci setup --repo … --force`. |
 | status phase **`duplicate_session`** | Another process uses this registration (another machine or a leftover process): stop it. |
 | status phase **`crashed`** | Repeated crashes; read `ownci logs` (the last 20 lines are in `status`), run `ownci doctor`. |
-| status says *stopped (unexpectedly)* | The supervisor was killed or the machine rebooted: `ownci start` recovers. |
+| status says *stopped (unexpectedly)* | The supervisor was killed or the machine rebooted: `ownci start` recovers (it also stops runner processes left over from the killed supervisor, which would otherwise hold the GitHub session). |
 | A job stays queued | Is the runner online (`ownci status --remote`)? Does the workflow have `runs-on: [ownci]`? Did WSL or the machine sleep? |
 | `already running (pid N)` | `ownci status`, then `ownci stop`. |
 
@@ -216,4 +241,4 @@ are recorded in [`tasks/00-context.md`](tasks/00-context.md) and the product req
 
 ## License
 
-TODO: no license has been chosen yet. Until one is added, all rights are reserved by the author.
+[MIT](LICENSE).
