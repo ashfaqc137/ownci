@@ -146,6 +146,77 @@ Expect: `✓ Runner unregistered from <repo>`; summary: `Runner process stopped`
 `Local files removed (… is gone)`. The runner has disappeared from Settings → Actions → Runners,
 and `ls $OWNCI_DATA` fails. Clean up the sandbox's `ownci-e2e-*` branches/PRs if you like.
 
+## Container-runner mode (t11)
+
+Run this after the host-mode steps, or on its own with a fresh data dir. It verifies
+that jobs **without** `container:` run in the runner container, that jobs **with** one
+still use their own image, and that each job gets a fresh container.
+
+```bash
+export OWNCI_DATA=~/ownci-e2e-cr                     # a plain path without symlinks
+O="./bin/ownci --data-dir $OWNCI_DATA"
+```
+
+### C1. Set up and start
+```bash
+$O setup --repo $OWNCI_E2E_REPO --mode container-runner
+$O doctor
+$O start --detach
+$O status --remote
+```
+Expect: setup prints `✓ Runner image ghcr.io/actions/actions-runner:…@sha256:… is ready` and
+`mode: container-runner`; `.env` has the cleanup hook but **no**
+`ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER`; doctor shows `[PASS] isolation … runner runs in a
+container` and `[PASS] runner-container`; status shows
+`Mode container-runner (image …) container ownci-<name>: running`, `State listening`,
+`GitHub online, idle`. `docker ps` lists `ownci-<name>`; `docker exec ownci-<name> ps -eo user,args`
+shows `Runner.Listener run --once` running as your uid (`id -u`), not root.
+
+### C2. Both kinds of job, a fresh container per job
+Dispatch `ownci-pass.yml`, `ownci-default-image.yml` and `ownci-poison.yml`, or
+`OWNCI_E2E_MODE=container-runner ./e2e/run.sh`.
+
+Expect: all green.
+- `ownci-pass`: the job container is `ubuntu:24.04` (as in host mode).
+- `ownci-default-image` `first`: Ubuntu 24.04 from the runner image, a non-root uid, `sudo -n true`
+  works, the Docker socket is there, and `PATH` has no `/mnt/…` entries (the host's PATH saved
+  by `config.sh` does not leak in). `second`: `ok, absent:` for all three markers planted
+  outside the workspace (a fresh container).
+- `ownci-poison`: as in host mode.
+- `$O logs -n 100` shows `[ownci] job finished; starting a fresh runner` after each job, and
+  `$O status` shows `restarts 0` (recycles are not crashes) and `last cleanup: ok`.
+
+### C3. Stop, restart, kill
+```bash
+$O stop                      # the container is gone: docker ps -a --filter name=ownci-
+$O start --detach            # same runner id on GitHub, no re-registration
+kill -9 "$(sed -n 's/.*"pid": \([0-9]*\).*/\1/p' $OWNCI_DATA/run/*.pid)"
+docker ps --filter name=ownci-  # the container outlives the supervisor
+$O start --detach            # removes the leftover container first, then listens again
+```
+
+### C4. A custom runner image (Ubuntu 22.04)
+```bash
+docker run --rm ubuntu:22.04 true    # plain image: expect setup to refuse it
+./bin/ownci --data-dir /tmp/ownci-e2e-bad setup --repo $OWNCI_E2E_REPO --mode container-runner --image ubuntu:22.04
+docker build -t ownci-test/ubuntu22-runner:1 -f e2e/images/ubuntu22.Dockerfile .
+$O setup --repo $OWNCI_E2E_REPO --force --mode container-runner --image ownci-test/ubuntu22-runner:1
+$O stop; $O start --detach
+```
+Expect: the plain image fails with `image ubuntu:22.04 cannot host the runner; it lacks: docker libicu`
+(plus warnings for git and sudo) **before** anything is registered (no new runner on GitHub). The
+built image is used without a pull; `doctor` shows `[PASS] runner-container`; the
+`ownci-default-image` job prints `Ubuntu 22.04.5 LTS`. Then `$O stop; $O start --detach --image <default
+image>` runs one session on the default image: `status` shows `container …: running (image <default>)`
+and the job prints Ubuntu 24.04; a later plain `start` is back on the configured image.
+
+### C5. Uninstall
+```bash
+$O uninstall --unregister --purge --yes
+docker ps -a --filter name=ownci-     # nothing
+ls /home/runner 2>/dev/null           # nothing: no stray directories on the host
+```
+
 ## Acceptance checklist (PRD §12)
 
 Tick in [`acceptance.md`](acceptance.md) with evidence (log excerpt, run URL, screenshot path).

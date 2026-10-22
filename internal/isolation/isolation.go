@@ -1,18 +1,20 @@
 // Package isolation installs, repairs and checks what makes the runner's
-// isolation policy real (D1, D10): the job-container requirement in the
-// runner's .env and the per-job cleanup hook with its pinned image.
+// isolation policy real (D1, D10, D13): the job-container requirement (host
+// mode) in the runner's .env, the per-job cleanup hook with its pinned image,
+// and the runner image (container-runner mode).
 package isolation
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/ashfaqc137/ownci/internal/config"
+	"github.com/ashfaqc137/ownci/internal/docker"
 	"github.com/ashfaqc137/ownci/internal/execx"
 	"github.com/ashfaqc137/ownci/internal/hooks"
 	"github.com/ashfaqc137/ownci/internal/runner"
@@ -26,11 +28,7 @@ const (
 	EnvCleanupImage     = "OWNCI_CLEANUP_IMAGE"
 )
 
-const (
-	dockerTimeout  = 10 * time.Minute // a first pull can be slow
-	inspectTimeout = 15 * time.Second
-	cleanupTimeout = 2 * time.Minute
-)
+const cleanupTimeout = 2 * time.Minute
 
 // Error is an isolation failure with an actionable hint.
 type Error struct{ Msg, Hint string }
@@ -38,32 +36,85 @@ type Error struct{ Msg, Hint string }
 func (e *Error) Error() string    { return e.Msg }
 func (e *Error) UserHint() string { return e.Hint }
 
-// ManagedEnv is the .env content OwnCI enforces for runnerDir.
-func ManagedEnv(runnerDir, image string) map[string]string {
-	return map[string]string{
-		EnvRequireContainer: "true",
-		EnvHookCompleted:    hooks.JobCompletedPath(runnerDir),
-		EnvRunnerRoot:       runnerDir,
-		EnvCleanupImage:     image,
-	}
+// Policy is what a runner directory must enforce: the execution mode and the
+// images it depends on.
+type Policy struct {
+	Mode         string // config.ModeHost or config.ModeContainerRunner
+	CleanupImage string
+	RunnerImage  string // container-runner mode only
 }
 
-// Install writes the hook and the .env entries and pulls the cleanup image.
-// It is called by setup right after the runner is configured.
-func Install(ctx context.Context, ex execx.Runner, runnerDir, image string) error {
+// HostPolicy is the host-mode policy (D1).
+func HostPolicy() Policy { return Policy{Mode: config.ModeHost, CleanupImage: hooks.CleanupImage} }
+
+// PolicyFor is the policy of a configured runner; image overrides the
+// configured runner image when not empty (`start --image`).
+func PolicyFor(rc *config.RunnerConfig, image string) Policy {
+	p := Policy{Mode: rc.EffectiveMode(), CleanupImage: hooks.CleanupImage}
+	if p.Mode == config.ModeContainerRunner {
+		p.RunnerImage = rc.Image
+		if image != "" {
+			p.RunnerImage = image
+		}
+	}
+	return p
+}
+
+func (p Policy) container() bool { return p.Mode == config.ModeContainerRunner }
+
+// ManagedEnv is the .env content OwnCI enforces for runnerDir. The runner
+// container mounts runnerDir at the same path, so the values hold in both
+// modes.
+func ManagedEnv(runnerDir string, p Policy) map[string]string {
+	m := map[string]string{
+		EnvHookCompleted: hooks.JobCompletedPath(runnerDir),
+		EnvRunnerRoot:    runnerDir,
+		EnvCleanupImage:  p.CleanupImage,
+	}
+	if !p.container() {
+		m[EnvRequireContainer] = "true"
+	}
+	return m
+}
+
+// absentEnv lists keys that must not be set: in container-runner mode jobs
+// without `container:` are the point, so the requirement is removed.
+func absentEnv(p Policy) []string {
+	if p.container() {
+		return []string{EnvRequireContainer}
+	}
+	return nil
+}
+
+// Install writes the hook and the .env entries and pulls the images that are
+// not present yet (a runner image may be built locally and exist in no
+// registry). It is called by setup right after the runner is configured.
+func Install(ctx context.Context, ex execx.Runner, runnerDir string, p Policy) error {
 	if _, err := writeHook(runnerDir); err != nil {
 		return err
 	}
-	if _, err := runner.EnsureEnv(runnerDir, ManagedEnv(runnerDir, image)); err != nil {
+	if _, err := runner.EnsureEnv(runnerDir, ManagedEnv(runnerDir, p), absentEnv(p)...); err != nil {
 		return &Error{Msg: "writing the runner's .env: " + err.Error(), Hint: "Check that " + runnerDir + " is writable."}
 	}
-	return pullImage(ctx, ex, image)
+	for _, image := range p.images() {
+		if _, err := docker.EnsureImage(ctx, ex, image); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p Policy) images() []string {
+	if p.container() {
+		return []string{p.CleanupImage, p.RunnerImage}
+	}
+	return []string{p.CleanupImage}
 }
 
 // Repair re-asserts everything Install did, without needing the network when
 // nothing is wrong. It returns a description of each thing it had to fix
 // (tampering, or a .env rewritten by the runner).
-func Repair(ctx context.Context, ex execx.Runner, runnerDir, image string) (fixed []string, err error) {
+func Repair(ctx context.Context, ex execx.Runner, runnerDir string, p Policy) (fixed []string, err error) {
 	wrote, err := writeHook(runnerDir)
 	if err != nil {
 		return nil, err
@@ -71,18 +122,21 @@ func Repair(ctx context.Context, ex execx.Runner, runnerDir, image string) (fixe
 	if wrote {
 		fixed = append(fixed, "rewrote the cleanup hook")
 	}
-	changed, err := runner.EnsureEnv(runnerDir, ManagedEnv(runnerDir, image))
+	changed, err := runner.EnsureEnv(runnerDir, ManagedEnv(runnerDir, p), absentEnv(p)...)
 	if err != nil {
 		return fixed, &Error{Msg: "restoring the runner's .env: " + err.Error(), Hint: "Check that " + runnerDir + " is writable."}
 	}
 	if changed {
 		fixed = append(fixed, "restored the isolation settings in .env")
 	}
-	if !imagePresent(ctx, ex, image) {
-		if err := pullImage(ctx, ex, image); err != nil {
+	for _, image := range p.images() {
+		pulled, err := docker.EnsureImage(ctx, ex, image)
+		if err != nil {
 			return fixed, err
 		}
-		fixed = append(fixed, "pulled the cleanup image")
+		if pulled {
+			fixed = append(fixed, "pulled "+image)
+		}
 	}
 	return fixed, nil
 }
@@ -129,30 +183,6 @@ func hookOK(path string) bool {
 	return err == nil && bytes.Equal(b, hooks.JobCompletedScript)
 }
 
-func pullImage(ctx context.Context, ex execx.Runner, image string) error {
-	ctx, cancel := context.WithTimeout(ctx, dockerTimeout)
-	defer cancel()
-	res, err := ex.Run(ctx, execx.Cmd{Name: "docker", Args: []string{"pull", "--quiet", image}})
-	if err != nil || res.ExitCode != 0 {
-		detail := fmt.Sprint(err)
-		if err == nil {
-			detail = excerpt(string(res.Stderr))
-		}
-		return &Error{
-			Msg:  fmt.Sprintf("pulling the cleanup image %s failed: %s", image, detail),
-			Hint: "Check your network and Docker (run 'ownci doctor'), then retry.",
-		}
-	}
-	return nil
-}
-
-func imagePresent(ctx context.Context, ex execx.Runner, image string) bool {
-	ctx, cancel := context.WithTimeout(ctx, inspectTimeout)
-	defer cancel()
-	res, err := ex.Run(ctx, execx.Cmd{Name: "docker", Args: []string{"image", "inspect", "--format", "{{.Id}}", image}})
-	return err == nil && res.ExitCode == 0
-}
-
 // RunCleanup runs the installed hook once, as the runner would after a job.
 // start uses it to clear leftovers of a crash or kill that happened mid-job.
 func RunCleanup(ctx context.Context, ex execx.Runner, runnerDir, image string) error {
@@ -194,29 +224,54 @@ type LastCleanup struct {
 
 // Report is the verified isolation state of one runner directory.
 type Report struct {
-	JobContainerRequired Item        `json:"jobContainerRequired"`
-	CleanupHook          Item        `json:"cleanupHook"`
-	CleanupImage         Item        `json:"cleanupImage"`
-	LastCleanup          LastCleanup `json:"lastCleanup"`
+	Mode string `json:"mode"`
+	// JobContainerRequired is set in host mode only.
+	JobContainerRequired *Item `json:"jobContainerRequired,omitempty"`
+	// RunnerImage is set in container-runner mode only: the image is
+	// present locally.
+	RunnerImage  *Item       `json:"runnerImage,omitempty"`
+	Image        string      `json:"image,omitempty"`
+	CleanupHook  Item        `json:"cleanupHook"`
+	CleanupImage Item        `json:"cleanupImage"`
+	LastCleanup  LastCleanup `json:"lastCleanup"`
 }
 
-// EnforcementOK is true when jobs are required to use a container and the
-// cleanup hook is in place. The image and the last cleanup are informational
-// (a missing image fails the cleanup, and so the job, visibly).
-func (r Report) EnforcementOK() bool { return r.JobContainerRequired.OK && r.CleanupHook.OK }
+// EnforcementOK is true when the cleanup hook is in place and, in host mode,
+// jobs are required to use a container. In container-runner mode jobs
+// without `container:` run inside the runner container by construction (the
+// supervisor only launches it there). The images and the last cleanup are
+// informational: a missing cleanup image fails the cleanup, and so the job,
+// visibly; a missing runner image is pulled before launch.
+func (r Report) EnforcementOK() bool {
+	if r.JobContainerRequired != nil && !r.JobContainerRequired.OK {
+		return false
+	}
+	return r.CleanupHook.OK
+}
 
 // Verify inspects runnerDir without changing anything.
-func Verify(ctx context.Context, ex execx.Runner, runnerDir, image string) Report {
-	var r Report
+func Verify(ctx context.Context, ex execx.Runner, runnerDir string, p Policy) Report {
+	r := Report{Mode: p.Mode}
 
 	env, err := runner.ReadEnv(runnerDir)
-	switch {
-	case err != nil:
-		r.JobContainerRequired = Item{Detail: err.Error()}
-	case env[EnvRequireContainer] != "true":
-		r.JobContainerRequired = Item{Detail: EnvRequireContainer + " is not set to true in .env"}
-	default:
-		r.JobContainerRequired = Item{OK: true}
+	if !p.container() {
+		var it Item
+		switch {
+		case err != nil:
+			it = Item{Detail: err.Error()}
+		case env[EnvRequireContainer] != "true":
+			it = Item{Detail: EnvRequireContainer + " is not set to true in .env"}
+		default:
+			it = Item{OK: true}
+		}
+		r.JobContainerRequired = &it
+	} else {
+		r.Image = p.RunnerImage
+		it := Item{OK: true}
+		if !docker.ImagePresent(ctx, ex, p.RunnerImage) {
+			it = Item{Detail: "runner image " + p.RunnerImage + " is not present locally"}
+		}
+		r.RunnerImage = &it
 	}
 
 	switch want := hooks.JobCompletedPath(runnerDir); {
@@ -228,10 +283,10 @@ func Verify(ctx context.Context, ex execx.Runner, runnerDir, image string) Repor
 		r.CleanupHook = Item{OK: true}
 	}
 
-	if imagePresent(ctx, ex, image) {
+	if docker.ImagePresent(ctx, ex, p.CleanupImage) {
 		r.CleanupImage = Item{OK: true}
 	} else {
-		r.CleanupImage = Item{Detail: "image " + image + " is not present locally"}
+		r.CleanupImage = Item{Detail: "image " + p.CleanupImage + " is not present locally"}
 	}
 
 	r.LastCleanup = readLastCleanup(runnerDir)
@@ -253,7 +308,7 @@ func readLastCleanup(runnerDir string) LastCleanup {
 // Problems lists what is wrong with the enforcement items, for error text.
 func (r Report) Problems() []string {
 	var p []string
-	if !r.JobContainerRequired.OK {
+	if r.JobContainerRequired != nil && !r.JobContainerRequired.OK {
 		p = append(p, "job container requirement: "+r.JobContainerRequired.Detail)
 	}
 	if !r.CleanupHook.OK {

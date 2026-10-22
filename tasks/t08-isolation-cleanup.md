@@ -126,7 +126,7 @@ $O stop; kill %1
 
 **Remaining isolation gaps (for t10's README)**
 1. **Network:** job containers use Docker's default bridge network and can reach the internet and the host's LAN; OwnCI sets no network policy.
-2. **Sibling containers:** `services:` containers, `uses: docker://…` and Dockerfile actions run as *siblings* on the host's Docker daemon, outside the job container's boundary; the Docker socket is not mounted into the job container, but these containers are not isolated from each other or constrained by OwnCI.
+2. **Sibling containers:** `services:` containers, `uses: docker://…` and Dockerfile actions run as *siblings* on the host's Docker daemon, outside the job container's boundary; (CORRECTION 2026-10-22: the runner does mount the Docker socket into the job container, see 00-context) these containers are not isolated from each other or constrained by OwnCI.
 3. **Shared Docker daemon:** job containers share the host's daemon, image store and build cache with everything else on the machine; images/layers persist between jobs (only `_work` is wiped). With Docker Desktop on WSL the daemon is shared with Windows.
 4. **Root in the job container:** containers run as root by default; files they create in the bind mounts (`_work`, `_work/_temp`, `_actions`, `_tool`) are root-owned on the host, which is why cleanup uses a container. The job container still has read-write access to those directories while the job runs.
 5. **Host-run steps:** only jobs with `container:` are allowed, but the runner itself (and the job-completed hook) runs on the host as the user; a malicious workflow cannot run steps on the host, yet a compromised container image/daemon could. Public repos / fork PRs remain gated by D3.

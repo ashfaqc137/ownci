@@ -25,6 +25,10 @@ const (
 	tailLines    = 20
 )
 
+// LaunchFailedPrefix starts State.LastError when Options.LaunchFailed ended
+// the run.
+const LaunchFailedPrefix = "the runner could not be launched"
+
 // Options configure Run. Zero values select the production defaults; tests
 // shorten the timings.
 type Options struct {
@@ -46,6 +50,21 @@ type Options struct {
 	// BeforeLaunch runs before every launch of the runner, restarts included.
 	// An error ends the run in phase crashed.
 	BeforeLaunch func(ctx context.Context) error
+
+	// Command is the runner's argv; nil runs <runner dir>/run.sh on the host.
+	// Container-runner mode runs `docker run …` (D13).
+	Command []string
+	// AfterExit runs after every exit of the runner process (container mode:
+	// remove a container the docker CLI left behind when it was killed).
+	AfterExit func(ctx context.Context)
+	// LaunchFailed classifies exit codes that mean the runner could not be
+	// launched at all (docker's 125–127): the run ends in phase crashed at
+	// once instead of being retried.
+	LaunchFailed func(code int) bool
+	// RecycleAfterJob relaunches the runner, without counting a restart, when
+	// it exits after finishing a job (container mode runs `run.sh --once`, so
+	// every job gets a fresh container).
+	RecycleAfterJob bool
 
 	Logger *slog.Logger
 	Now    func() time.Time
@@ -135,16 +154,21 @@ func (s *supervisor) loop(ctx context.Context) (State, error) {
 	t, o := s.t, s.o
 	var restarts []time.Time
 	for {
+		// Leftovers first: BeforeLaunch cleans the workspace, which an
+		// orphaned runner could still be using.
+		if pids := killOrphans(s.dir); len(pids) > 0 {
+			t.notice(fmt.Sprintf("stopped %d leftover runner process(es) from an earlier run: %v", len(pids), pids))
+		}
 		if o.BeforeLaunch != nil {
 			if err := o.BeforeLaunch(ctx); err != nil {
 				t.finish(PhaseCrashed, nil, "preparing to start the runner: "+err.Error())
 				return t.snapshot(), err
 			}
 		}
-		if pids := killOrphans(s.dir); len(pids) > 0 {
-			t.notice(fmt.Sprintf("stopped %d leftover runner process(es) from an earlier run: %v", len(pids), pids))
-		}
 		exit, stopped := s.runOnce(ctx)
+		if o.AfterExit != nil {
+			o.AfterExit(context.WithoutCancel(ctx))
+		}
 		code := exit
 		switch {
 		case stopped:
@@ -159,6 +183,17 @@ func (s *supervisor) loop(ctx context.Context) (State, error) {
 		case t.sawDuplicateSession():
 			t.finish(PhaseDuplicateSession, &code, "")
 			return t.snapshot(), nil
+		case o.LaunchFailed != nil && o.LaunchFailed(exit) && !t.sawConnected():
+			t.finish(PhaseCrashed, &code, fmt.Sprintf("%s (exit code %d):\n%s", LaunchFailedPrefix, exit, strings.Join(t.tailCopy(), "\n")))
+			return t.snapshot(), nil
+		case o.RecycleAfterJob && t.sawJobDone():
+			t.notice(fmt.Sprintf("job finished; starting a fresh runner (exit code %d)", exit))
+			t.update(func(st *State) {
+				st.ExitCode = &code
+				st.RunnerPID = 0
+				st.setPhase(PhaseStarting, o.Now())
+			})
+			continue
 		}
 
 		// Crash or unexpected exit: restart with backoff, within a budget.
@@ -200,7 +235,11 @@ func (s *supervisor) loop(ctx context.Context) (State, error) {
 func (s *supervisor) runOnce(ctx context.Context) (exitCode int, stopped bool) {
 	t, o := s.t, s.o
 	t.resetMarkers()
-	cmd := newRunCmd(s.dir, o.Env)
+	argv := o.Command
+	if len(argv) == 0 {
+		argv = []string{filepath.Join(s.dir, "run.sh")}
+	}
+	cmd := newExecCmd(argv, s.dir, o.Env)
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		t.notice("creating output pipe: " + err.Error())
@@ -310,7 +349,7 @@ type tracker struct {
 	echo io.Writer // terminal, may be nil
 	tail []string
 
-	regLost, dupSession bool
+	regLost, dupSession, connected, jobDone bool
 }
 
 func (t *tracker) persist() {
@@ -334,12 +373,14 @@ func (t *tracker) snapshot() State {
 
 func (t *tracker) resetMarkers() {
 	t.mu.Lock()
-	t.regLost, t.dupSession = false, false
+	t.regLost, t.dupSession, t.connected, t.jobDone = false, false, false, false
 	t.mu.Unlock()
 }
 
 func (t *tracker) sawRegistrationLost() bool { t.mu.Lock(); defer t.mu.Unlock(); return t.regLost }
 func (t *tracker) sawDuplicateSession() bool { t.mu.Lock(); defer t.mu.Unlock(); return t.dupSession }
+func (t *tracker) sawConnected() bool        { t.mu.Lock(); defer t.mu.Unlock(); return t.connected }
+func (t *tracker) sawJobDone() bool          { t.mu.Lock(); defer t.mu.Unlock(); return t.jobDone }
 
 func (t *tracker) tailCopy() []string {
 	t.mu.Lock()
@@ -392,6 +433,10 @@ func (t *tracker) onLine(line string) {
 		t.regLost = true
 	case EvDuplicateSession:
 		t.dupSession = true
+	case EvConnected, EvListening:
+		t.connected = true
+	case EvJobDone:
+		t.jobDone = true
 	}
 	if t.st.Apply(ev, t.now()) {
 		t.persist()
@@ -427,8 +472,4 @@ func LastLines(path string, n int) []string {
 		lines = lines[len(lines)-n:]
 	}
 	return lines
-}
-
-func newRunCmd(dir string, extraEnv []string) *execCmd {
-	return newExecCmd(filepath.Join(dir, "run.sh"), dir, extraEnv)
 }

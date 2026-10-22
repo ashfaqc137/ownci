@@ -12,7 +12,7 @@ import (
 	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/doctor"
 	"github.com/ashfaqc137/ownci/internal/execx"
-	"github.com/ashfaqc137/ownci/internal/hooks"
+	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/spf13/cobra"
 )
 
@@ -46,7 +46,11 @@ Exits 3 when any check fails; warnings do not affect the exit code.`,
 				doctor.GitCheck(ex),
 			}
 			if cfg, err := config.Load(app.Paths); err == nil {
-				checks = append(checks, doctor.IsolationCheck(ex, app.Paths.RunnerDir(cfg.Runner.Name), hooks.CleanupImage))
+				dir, pol := app.Paths.RunnerDir(cfg.Runner.Name), isolation.PolicyFor(cfg.Runner, "")
+				checks = append(checks, doctor.IsolationCheck(ex, dir, pol))
+				if pol.Mode == config.ModeContainerRunner {
+					checks = append(checks, doctor.RunnerContainerCheck(ex, dir, pol.RunnerImage))
+				}
 			}
 			rep := doctor.Run(cmd.Context(), checks)
 			var err error

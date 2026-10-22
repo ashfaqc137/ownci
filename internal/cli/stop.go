@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ashfaqc137/ownci/internal/config"
+	"github.com/ashfaqc137/ownci/internal/runnercontainer"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
 	"github.com/spf13/cobra"
 )
@@ -38,10 +40,17 @@ runner back. A running job is cancelled. If the runner does not stop within
 			if running, _, err := supervisor.IsRunning(app.Paths, name); err == nil && running {
 				fmt.Fprintf(app.Out, "Stopping runner '%s' (a running job is cancelled)…\n", name)
 			}
-			err = supervisor.Stop(cmd.Context(), app.Paths, name, supervisor.StopOptions{Timeout: timeout, Force: force})
+			so := supervisor.StopOptions{Timeout: timeout, Force: force}
+			if cfg.Runner.EffectiveMode() == config.ModeContainerRunner {
+				so.AfterKill = func(ctx context.Context) { removeLeftoverContainer(ctx, app, name) }
+			}
+			err = supervisor.Stop(cmd.Context(), app.Paths, name, so)
 			switch {
 			case errors.Is(err, supervisor.ErrNotRunning):
 				fmt.Fprintf(app.Out, "Runner '%s' is not running\n", name)
+				if cfg.Runner.EffectiveMode() == config.ModeContainerRunner {
+					removeLeftoverContainer(cmd.Context(), app, name)
+				}
 				return nil
 			case errors.Is(err, supervisor.ErrStopTimeout):
 				return &UserError{
@@ -58,4 +67,19 @@ runner back. A running job is cancelled. If the runner does not stop within
 	cmd.Flags().DurationVar(&timeout, "timeout", 45*time.Second, "how long to wait for a graceful stop")
 	cmd.Flags().BoolVar(&force, "force", false, "kill the runner if it does not stop within --timeout")
 	return cmd
+}
+
+// removeLeftoverContainer removes a runner container that outlived its
+// supervisor (killed, or the machine went down). It would otherwise keep the
+// runner's GitHub session.
+func removeLeftoverContainer(ctx context.Context, app *App, name string) {
+	ex := newExecRunner(app.Logger)
+	if _, err := runnercontainer.Inspect(ctx, ex, name); err != nil {
+		return // none, or Docker is unavailable: nothing we can remove
+	}
+	if err := runnercontainer.Remove(ctx, ex, name); err != nil {
+		fmt.Fprintf(app.Err, "Warning: %v\n", err)
+		return
+	}
+	fmt.Fprintf(app.Out, "✓ Removed the leftover runner container %s\n", runnercontainer.ContainerName(name))
 }

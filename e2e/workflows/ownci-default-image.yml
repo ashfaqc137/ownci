@@ -1,0 +1,54 @@
+# Expected (container-runner mode only): green. Jobs WITHOUT `container:` run
+# inside the runner container (the default image) as the host user, with sudo
+# and the Docker socket, and every job gets a fresh container: what `first`
+# leaves outside the workspace is gone in `second`.
+# On a host-mode runner both jobs are rejected (no container).
+name: ownci-default-image
+on:
+  workflow_dispatch:
+
+jobs:
+  first:
+    runs-on: [ownci]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Where is this running?
+        run: |
+          set -eu
+          cat /etc/os-release
+          id
+          echo "PATH=$PATH"
+          echo "runner=$RUNNER_NAME"
+          test -f /.dockerenv || grep -qE 'docker|containerd' /proc/1/cgroup
+          test "$(id -u)" != 0
+          test -w "$GITHUB_WORKSPACE"
+          sudo -n true
+          test -S /var/run/docker.sock
+          docker version --format 'docker server {{.Server.Version}}'
+          case ":$PATH:" in
+            *:/mnt/*) echo "the host's PATH leaked into the container"; exit 1 ;;
+          esac
+
+      - name: Plant markers outside the workspace
+        run: |
+          set -eu
+          sudo touch /opt/ownci-poison
+          touch "$HOME/ownci-poison" /tmp/ownci-poison
+
+  second:
+    needs: first
+    runs-on: [ownci]
+    steps:
+      - name: Assert a fresh container
+        run: |
+          fail=0
+          for p in /opt/ownci-poison "$HOME/ownci-poison" /tmp/ownci-poison; do
+            if [ -e "$p" ]; then
+              echo "LEFTOVER FROM THE PREVIOUS JOB: $p"
+              fail=1
+            else
+              echo "ok, absent: $p"
+            fi
+          done
+          exit "$fail"

@@ -21,6 +21,7 @@ import (
 	"github.com/ashfaqc137/ownci/internal/execx"
 	"github.com/ashfaqc137/ownci/internal/github"
 	"github.com/ashfaqc137/ownci/internal/runner"
+	"github.com/ashfaqc137/ownci/internal/runnercontainer"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
 )
 
@@ -262,6 +263,7 @@ func (r *run) stop(ctx context.Context) error {
 	}
 	if !running {
 		r.sum.process = "was not running"
+		r.removeContainer(ctx)
 		return nil
 	}
 	err = supervisor.Stop(ctx, d.Paths, r.name, supervisor.StopOptions{Timeout: d.StopTimeout, Force: true})
@@ -271,7 +273,28 @@ func (r *run) stop(ctx context.Context) error {
 	}
 	fmt.Fprintf(d.Out, "✓ Runner '%s' stopped\n", r.name)
 	r.sum.process = "stopped"
+	r.removeContainer(ctx)
 	return nil
+}
+
+// removeContainer removes the runner container (container-runner mode) if
+// one is left, e.g. by a killed supervisor. Without a readable config the mode
+// is unknown, so it looks anyway.
+func (r *run) removeContainer(ctx context.Context) {
+	if r.cfg != nil && r.cfg.EffectiveMode() != config.ModeContainerRunner {
+		return
+	}
+	if _, err := r.d.Exec.LookPath("docker"); err != nil {
+		return
+	}
+	if _, err := runnercontainer.Inspect(ctx, r.d.Exec, r.name); err != nil {
+		return
+	}
+	if err := runnercontainer.Remove(ctx, r.d.Exec, r.name); err != nil {
+		fmt.Fprintf(r.d.Err, "Warning: %v (remove it with 'docker rm -f %s')\n", err, runnercontainer.ContainerName(r.name))
+		return
+	}
+	fmt.Fprintf(r.d.Out, "✓ Removed the runner container %s\n", runnercontainer.ContainerName(r.name))
 }
 
 // unregister removes the registration: config.sh remove first, the REST API

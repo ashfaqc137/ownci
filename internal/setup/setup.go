@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ashfaqc137/ownci/internal/config"
+	"github.com/ashfaqc137/ownci/internal/docker"
 	"github.com/ashfaqc137/ownci/internal/doctor"
 	"github.com/ashfaqc137/ownci/internal/execx"
 	"github.com/ashfaqc137/ownci/internal/github"
@@ -23,14 +24,17 @@ import (
 	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/platform"
 	"github.com/ashfaqc137/ownci/internal/runner"
+	"github.com/ashfaqc137/ownci/internal/runnercontainer"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
 )
 
 const (
-	// IsolationMode is recorded in config.json (D1).
+	// IsolationMode is recorded in config.json for host mode (D1).
 	IsolationMode = "docker-job-container"
-	securityDocs  = "https://docs.github.com/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security"
-	permissionFix = "Use a fine-grained PAT with 'Administration: read & write' on this repository, or a classic PAT with the 'repo' scope."
+	// IsolationRunnerContainer is recorded for container-runner mode (D13).
+	IsolationRunnerContainer = "docker-runner-container"
+	securityDocs             = "https://docs.github.com/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security"
+	permissionFix            = "Use a fine-grained PAT with 'Administration: read & write' on this repository, or a classic PAT with the 'repo' scope."
 )
 
 // Error is a setup failure with an actionable hint. The cli layer renders it
@@ -49,11 +53,17 @@ func (e *Error) UserHint() string { return e.Hint }
 type Options struct {
 	Repo            string   // "owner/name" or a GitHub URL
 	Name            string   // "" = default (or the configured runner's name)
-	Labels          []string // extra labels; "ownci" is always added
+	Labels          []string // extra labels; "ownci" is always added; nil keeps an existing setup's labels
 	Force           bool
 	AllowPublicRepo bool
 	DryRun          bool
 	SkipDockerCheck bool
+	// Mode is config.ModeHost or config.ModeContainerRunner; "" keeps the
+	// mode of an existing setup (host for a new one).
+	Mode string
+	// Image is the runner image in container-runner mode; "" selects
+	// runnercontainer.DefaultImage.
+	Image string
 }
 
 // Deps are the collaborators, injected so tests need no network or Docker.
@@ -74,11 +84,13 @@ type Deps struct {
 }
 
 type run struct {
-	d    Deps
-	o    Options
-	repo github.Repo
-	name string
-	dir  string
+	d     Deps
+	o     Options
+	repo  github.Repo
+	name  string
+	dir   string
+	mode  string
+	image string // runner image, container-runner mode only
 }
 
 // Run executes the setup flow. See tasks/t06-setup.md for the step list; the
@@ -97,6 +109,10 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	labels, err := ValidateLabels(o.Labels)
 	if err != nil {
 		return err
+	}
+	if o.Mode != "" && !config.ValidMode(o.Mode) {
+		return &Error{Usage: true, Msg: fmt.Sprintf("unknown --mode %q", o.Mode),
+			Hint: fmt.Sprintf("Use --mode %s (jobs must declare container:) or --mode %s (the runner runs in a container that is the default job image).", config.ModeHost, config.ModeContainerRunner)}
 	}
 	name := o.Name
 	if name == "" {
@@ -117,7 +133,17 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		return err
 	}
 	r.dir = d.Paths.RunnerDir(r.name)
+	if o.Labels == nil && prev != nil {
+		// Re-running setup (--force, a mode switch) keeps the labels
+		// workflows already target.
+		if labels, err = ValidateLabels(prev.Labels); err != nil {
+			return err
+		}
+	}
 	allLabels := append([]string{"ownci"}, labels...)
+	if err := r.resolveMode(prev); err != nil {
+		return err
+	}
 
 	// 3. Token.
 	token, src, err := github.ResolveToken(ctx, d.Getenv, d.Exec)
@@ -148,15 +174,29 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	if err != nil {
 		return err
 	}
+	// 6b. The runner image, checked before anything is registered on GitHub.
+	if r.mode == config.ModeContainerRunner {
+		if err := r.prepareImage(ctx); err != nil {
+			return err
+		}
+	}
 	// 7. Registration token (single-use, short-lived).
 	reg, err := gh.RegistrationToken(ctx, repo)
 	if err != nil {
 		return err
 	}
 	// 8. Configure.
-	if err := runner.Configure(ctx, d.Exec, r.dir, runner.ConfigureOptions{
-		URL: repoURL, Token: reg.Token, Name: r.name, Labels: allLabels, Replace: o.Force,
-	}); err != nil {
+	configure := func() error {
+		return runner.Configure(ctx, d.Exec, r.dir, runner.ConfigureOptions{
+			URL: repoURL, Token: reg.Token, Name: r.name, Labels: allLabels, Replace: o.Force,
+		})
+	}
+	if reuse {
+		err = r.reconfigure(configure)
+	} else {
+		err = configure()
+	}
+	if err != nil {
 		return err
 	}
 	r.ok("Runner configured")
@@ -164,8 +204,8 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	if err := r.verify(ctx, gh); err != nil {
 		return err
 	}
-	// 10. Isolation: .env enforcement, cleanup hook and image.
-	if err := installIsolation(ctx, d, r.dir, repo.String()); err != nil {
+	// 10. Isolation: .env enforcement, cleanup hook and images.
+	if err := installIsolation(ctx, d, r.dir, repo.String(), r.policy()); err != nil {
 		return err
 	}
 	// 11. Persist.
@@ -175,8 +215,11 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	}
 	cfg := &config.Config{Runner: &config.RunnerConfig{
 		Name: r.name, Provider: "github", Repo: repo.String(), URL: repoURL, Labels: allLabels,
-		InstalledVersion: version, Isolation: IsolationMode, CreatedAt: created,
+		InstalledVersion: version, Isolation: IsolationMode, Mode: r.mode, CreatedAt: created,
 	}}
+	if r.mode == config.ModeContainerRunner {
+		cfg.Runner.Isolation, cfg.Runner.Image = IsolationRunnerContainer, r.image
+	}
 	if err := config.Save(d.Paths, cfg); err != nil {
 		return &Error{
 			Msg: fmt.Sprintf("the runner is registered on GitHub, but saving OwnCI's config failed: %v", err),
@@ -186,13 +229,57 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		}
 	}
 	// 12. Next steps.
-	fmt.Fprintf(d.Out, "✓ OwnCI is set up for %s as runner '%s' (labels: %s)\n", repo, r.name, strings.Join(allLabels, ","))
+	fmt.Fprintf(d.Out, "✓ OwnCI is set up for %s as runner '%s' (labels: %s, mode: %s)\n", repo, r.name, strings.Join(allLabels, ","), r.mode)
+	if r.mode == config.ModeContainerRunner {
+		fmt.Fprintf(d.Out, "Next:\n  1. Start contributing compute:   ownci start\n"+
+			"  2. Target it from a workflow:    runs-on: [ownci]\n"+
+			"     (jobs without 'container:' run in %s; jobs with one use their own image)\n"+
+			"Isolation notes: every job can use the host's Docker daemon through its socket, job\n"+
+			"containers can reach the network, and 'services:' run as sibling containers.\n", r.image)
+		return nil
+	}
 	fmt.Fprintf(d.Out, "Next:\n  1. Start contributing compute:   ownci start\n"+
 		"  2. Target it from a workflow:    runs-on: [ownci]   and   container: <image>\n"+
 		"     (jobs without 'container:' will be rejected by this runner)\n"+
 		"Isolation notes: job containers can still reach the network, and 'services:' and\n"+
 		"'uses: docker://…' actions run as sibling containers on the same Docker daemon.\n")
 	return nil
+}
+
+// resolveMode settles the execution mode and runner image: the flags win, an
+// existing setup's mode is kept when --mode is not given, and a new setup is
+// host mode (D1).
+func (r *run) resolveMode(prev *config.RunnerConfig) error {
+	r.mode = r.o.Mode
+	if r.mode == "" {
+		r.mode = config.ModeHost
+		if prev != nil {
+			r.mode = prev.EffectiveMode()
+		}
+	}
+	if r.mode != config.ModeContainerRunner {
+		if r.o.Image != "" {
+			return &Error{Usage: true, Msg: "--image needs --mode " + config.ModeContainerRunner,
+				Hint: "In host mode each job names its image with 'container:'."}
+		}
+		return nil
+	}
+	r.image = r.o.Image
+	if r.image == "" {
+		r.image = runnercontainer.DefaultImage
+	}
+	if err := runnercontainer.CheckPath(r.dir); err != nil {
+		return &Error{Msg: err.Error(), Hint: hintOr(err, ""), Err: err}
+	}
+	return nil
+}
+
+func (r *run) policy() isolation.Policy {
+	p := isolation.HostPolicy()
+	if r.mode == config.ModeContainerRunner {
+		p.Mode, p.RunnerImage = r.mode, r.image
+	}
+	return p
 }
 
 func (r *run) ok(format string, a ...any) { fmt.Fprintf(r.d.Out, "✓ "+format+"\n", a...) }
@@ -387,6 +474,41 @@ func (r *run) install(ctx context.Context, reuse bool, prev *config.RunnerConfig
 	return res.InstalledVersion, nil
 }
 
+// prepareImage pulls the runner image unless it is present (it may be built
+// locally) and probes that it can host the runner.
+func (r *run) prepareImage(ctx context.Context) error {
+	if _, err := docker.EnsureImage(ctx, r.d.Exec, r.image); err != nil {
+		return &Error{Msg: err.Error(), Hint: hintOr(err, "Check the image name and your network."), Err: err}
+	}
+	warnings, err := runnercontainer.Probe(ctx, r.d.Exec, r.image)
+	for _, w := range warnings {
+		r.warn("runner image %s: %s", r.image, w)
+	}
+	if err != nil {
+		return &Error{Msg: err.Error(), Hint: hintOr(err, "Check the image with 'docker run --rm -it --entrypoint bash "+r.image+"'."), Err: err}
+	}
+	r.ok("Runner image %s is ready", r.image)
+	return nil
+}
+
+// reconfigure registers a runner directory that already holds a
+// registration. config.sh refuses an existing .runner even with --replace, so
+// the old files are moved aside, and put back if registering fails.
+func (r *run) reconfigure(configure func() error) error {
+	restore, discard, err := runner.SetAsideRegistration(r.dir)
+	if err != nil {
+		return &Error{Msg: err.Error(), Hint: "Check that " + r.dir + " is writable.", Err: err}
+	}
+	if err := configure(); err != nil {
+		if rerr := restore(); rerr != nil {
+			r.warn("restoring the previous registration files failed: %v", rerr)
+		}
+		return err
+	}
+	discard()
+	return nil
+}
+
 // verify reads .runner back and, best effort, confirms GitHub lists the runner.
 func (r *run) verify(ctx context.Context, gh *github.Client) error {
 	rf, err := runner.ReadRunnerFile(r.dir)
@@ -428,7 +550,12 @@ func (r *run) dryRun(repoURL string, labels []string, reuse bool) error {
 		URL: repoURL, Token: "", Name: r.name, Labels: labels, Replace: r.o.Force,
 	}, true)
 	fmt.Fprintf(out, "Would run, in %s:\n  ./config.sh %s\n", r.dir, strings.Join(args, " "))
-	fmt.Fprintf(out, "Would install the cleanup hook, require job containers in %s and pull %s\n", filepath.Join(r.dir, ".env"), hooks.CleanupImage)
+	if r.mode == config.ModeContainerRunner {
+		fmt.Fprintf(out, "Would install the cleanup hook in %s and pull %s\n", filepath.Join(r.dir, ".env"), hooks.CleanupImage)
+		fmt.Fprintf(out, "Would pull and probe the runner image %s (mode %s: jobs without 'container:' run in it)\n", r.image, r.mode)
+	} else {
+		fmt.Fprintf(out, "Would install the cleanup hook, require job containers in %s and pull %s (mode %s)\n", filepath.Join(r.dir, ".env"), hooks.CleanupImage, r.mode)
+	}
 	fmt.Fprintf(out, "Would save %s\n", r.d.Paths.ConfigFile)
 	return nil
 }
@@ -437,8 +564,8 @@ func (r *run) dryRun(repoURL string, labels []string, reuse bool) error {
 // the cleanup hook in the runner's .env, and the pinned cleanup image. The
 // runner is already registered at this point, so a failure tells the user how
 // to retry.
-func installIsolation(ctx context.Context, d Deps, dir, repo string) error {
-	err := isolation.Install(ctx, d.Exec, dir, hooks.CleanupImage)
+func installIsolation(ctx context.Context, d Deps, dir, repo string, p isolation.Policy) error {
+	err := isolation.Install(ctx, d.Exec, dir, p)
 	if err == nil {
 		return nil
 	}

@@ -25,6 +25,7 @@ func newStartCmd() *cobra.Command {
 	var (
 		detach bool
 		wait   time.Duration
+		image  string
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -33,7 +34,10 @@ func newStartCmd() *cobra.Command {
 
 By default the runner runs in the foreground: its output is shown and Ctrl-C
 stops it gracefully. With --detach it runs in the background; stop it with
-'ownci stop'.`,
+'ownci stop'.
+
+In container-runner mode (setup --mode container-runner) --image runs this
+session with another runner image; the image needs the runner's dependencies.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app := appFrom(cmd)
@@ -41,14 +45,18 @@ stops it gracefully. With --detach it runs in the background; stop it with
 			if err != nil {
 				return err
 			}
+			if image != "" && cfg.Runner.EffectiveMode() != config.ModeContainerRunner {
+				return &UserError{Msg: "--image needs a runner set up with --mode " + config.ModeContainerRunner, Code: exitUsage,
+					Hint: "In host mode each job names its image with 'container:'. Switch with 'ownci setup --repo " + cfg.Runner.Repo + " --force --mode " + config.ModeContainerRunner + "'."}
+			}
 			if app.Platform.IsWSL {
 				fmt.Fprintln(app.Err, wslNote)
 			}
 			if detach {
-				return startDetached(cmd.Context(), app, cfg, wait)
+				return startDetached(cmd.Context(), app, cfg, wait, image)
 			}
-			fmt.Fprintf(app.Out, "Starting runner '%s' for %s (Ctrl-C to stop)\n", cfg.Runner.Name, cfg.Runner.Repo)
-			st, err := runSupervisor(cmd.Context(), app, cfg, supervisor.ModeForeground, app.Out)
+			fmt.Fprintf(app.Out, "Starting runner '%s' for %s%s (Ctrl-C to stop)\n", cfg.Runner.Name, cfg.Runner.Repo, modeNote(cfg, image))
+			st, err := runSupervisor(cmd.Context(), app, cfg, supervisor.ModeForeground, app.Out, image)
 			if err := failureError(cfg.Runner.Name, st, err); err != nil {
 				return err
 			}
@@ -58,7 +66,19 @@ stops it gracefully. With --detach it runs in the background; stop it with
 	}
 	cmd.Flags().BoolVar(&detach, "detach", false, "run the runner in the background")
 	cmd.Flags().DurationVar(&wait, "wait", 60*time.Second, "with --detach: how long to wait for the runner to start listening")
+	cmd.Flags().StringVar(&image, "image", "", "container-runner mode: runner image for this session (default: the one chosen at setup)")
 	return cmd
+}
+
+// modeNote describes a container-runner session for the start messages.
+func modeNote(cfg *config.Config, image string) string {
+	if cfg.Runner.EffectiveMode() != config.ModeContainerRunner {
+		return ""
+	}
+	if image == "" {
+		image = cfg.Runner.Image
+	}
+	return " in a container (" + image + ")"
 }
 
 // checkStartPreconditions verifies everything start needs and returns the
@@ -90,7 +110,7 @@ func checkStartPreconditions(ctx context.Context, app *App) (*config.Config, err
 
 // startDetached re-executes ownci as a background supervisor and waits until
 // the runner is listening, has failed, or the wait expires.
-func startDetached(ctx context.Context, app *App, cfg *config.Config, wait time.Duration) error {
+func startDetached(ctx context.Context, app *App, cfg *config.Config, wait time.Duration, image string) error {
 	name := cfg.Runner.Name
 	exe, err := executablePath()
 	if err != nil {
@@ -102,7 +122,11 @@ func startDetached(ctx context.Context, app *App, cfg *config.Config, wait time.
 	}
 	defer supLog.Close()
 
-	child := exec.Command(exe, "__supervise", "--name", name, "--data-dir", app.Paths.Root)
+	args := []string{"__supervise", "--name", name, "--data-dir", app.Paths.Root}
+	if image != "" {
+		args = append(args, "--image", image)
+	}
+	child := exec.Command(exe, args...)
 	child.Stdout, child.Stderr = supLog, supLog // Stdin nil = /dev/null
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := child.Start(); err != nil {
@@ -122,7 +146,7 @@ func startDetached(ctx context.Context, app *App, cfg *config.Config, wait time.
 		if st != nil && st.SupervisorPID == pid {
 			switch {
 			case st.Phase == supervisor.PhaseListening || st.Phase == supervisor.PhaseBusy:
-				fmt.Fprintf(app.Out, "✓ Runner '%s' is listening for jobs on %s (pid %d). Stop with: ownci stop\n", name, cfg.Runner.Repo, pid)
+				fmt.Fprintf(app.Out, "✓ Runner '%s' is listening for jobs on %s%s (pid %d). Stop with: ownci stop\n", name, cfg.Runner.Repo, modeNote(cfg, image), pid)
 				return nil
 			case st.Phase.Failed():
 				return detachFailure(app, name, *st)

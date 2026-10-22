@@ -124,8 +124,9 @@ func TestConfigureAndRemove(t *testing.T) {
 	if out, code := configure(t, dir); code != 1 || !strings.Contains(out, "already configured") {
 		t.Errorf("second configure: %q %d", out, code)
 	}
-	if _, code := configure(t, dir, "--replace"); code != 0 {
-		t.Errorf("--replace exit = %d", code)
+	// Like the real config.sh: --replace does not override a local .runner.
+	if out, code := configure(t, dir, "--replace"); code != 1 || !strings.Contains(out, "already configured") {
+		t.Errorf("--replace over .runner: %q %d", out, code)
 	}
 
 	if out, code := script(t, dir, "config.sh", nil, "remove", "--token", "T"); code != 0 || !strings.Contains(out, "Runner removed successfully") {

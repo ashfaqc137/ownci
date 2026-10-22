@@ -43,6 +43,9 @@ type StopOptions struct {
 	// IsOwnci verifies that a pid is an ownci process before it is signalled
 	// (a pidfile can outlive its process). Default: look at /proc/<pid>/cmdline.
 	IsOwnci func(pid int) bool
+	// AfterKill runs after a forced kill, for what the killed supervisor could
+	// not clean up itself (container mode: the runner container).
+	AfterKill func(ctx context.Context)
 }
 
 // Stop asks the supervisor to stop and waits for it to release the lock.
@@ -84,6 +87,9 @@ func Stop(ctx context.Context, paths config.Paths, name string, o StopOptions) e
 	}
 	if !waitUnlocked(ctx, paths, name, 5*time.Second) {
 		return fmt.Errorf("supervisor pid %d is still alive after SIGKILL", info.PID)
+	}
+	if o.AfterKill != nil {
+		o.AfterKill(ctx)
 	}
 	_ = os.Remove(paths.PidFile(name))
 	st, _ := ReadState(paths.StateFile(name))

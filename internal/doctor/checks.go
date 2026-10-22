@@ -11,6 +11,7 @@ import (
 	"github.com/ashfaqc137/ownci/internal/execx"
 	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/platform"
+	"github.com/ashfaqc137/ownci/internal/runnercontainer"
 )
 
 // PlatformCheck verifies the OS and CPU architecture are supported.
@@ -128,23 +129,60 @@ func GitCheck(r execx.Runner) Check {
 	}}
 }
 
-// IsolationCheck verifies the runner enforces the isolation policy: job
-// containers required, cleanup hook installed, cleanup image present.
-func IsolationCheck(r execx.Runner, runnerDir, image string) Check {
+// IsolationCheck verifies the runner enforces its isolation policy: in host
+// mode job containers are required; in both modes the cleanup hook and
+// cleanup image are in place.
+func IsolationCheck(r execx.Runner, runnerDir string, p isolation.Policy) Check {
 	return Check{Name: "isolation", Run: func(ctx context.Context) Result {
-		rep := isolation.Verify(ctx, r, runnerDir, image)
+		rep := isolation.Verify(ctx, r, runnerDir, p)
 		switch {
 		case !rep.EnforcementOK():
 			return Result{Level: Fail, Detail: strings.Join(rep.Problems(), "; "),
 				Hint: "'ownci start' repairs this, or run 'ownci setup --force'."}
 		case !rep.CleanupImage.OK:
 			return Result{Level: Warn, Detail: rep.CleanupImage.Detail,
-				Hint: "docker pull " + image + " ('ownci start' also pulls it)."}
+				Hint: "docker pull " + p.CleanupImage + " ('ownci start' also pulls it)."}
 		}
-		detail := "container jobs required, cleanup hook and image in place; last cleanup: " + rep.LastCleanup.Result
+		what := "container jobs required"
+		if rep.JobContainerRequired == nil {
+			what = "runner runs in a container"
+		}
+		detail := what + ", cleanup hook and image in place; last cleanup: " + rep.LastCleanup.Result
 		if rep.LastCleanup.Result == "failed" {
 			return Result{Level: Warn, Detail: detail, Hint: "The last per-job cleanup failed: " + rep.LastCleanup.Detail}
 		}
 		return Result{Level: Pass, Detail: detail}
 	}}
+}
+
+// RunnerContainerCheck verifies what container-runner mode needs (D13): a
+// runner directory Docker can mount at the same path, and a runner image that
+// is present and has the runner's dependencies.
+func RunnerContainerCheck(r execx.Runner, runnerDir, image string) Check {
+	return Check{Name: "runner-container", Run: func(ctx context.Context) Result {
+		if err := runnercontainer.CheckPath(runnerDir); err != nil {
+			return Result{Level: Fail, Detail: err.Error(), Hint: hintOf(err)}
+		}
+		if !docker.ImagePresent(ctx, r, image) {
+			return Result{Level: Warn, Detail: "runner image " + image + " is not present locally",
+				Hint: "docker pull " + image + " ('ownci start' also pulls it)."}
+		}
+		warnings, err := runnercontainer.Probe(ctx, r, image)
+		if err != nil {
+			return Result{Level: Fail, Detail: err.Error(), Hint: hintOf(err)}
+		}
+		if len(warnings) > 0 {
+			return Result{Level: Warn, Detail: "image " + image + " can host the runner, but " + strings.Join(warnings, "; "),
+				Hint: "Add the missing tools to the image if your workflows need them."}
+		}
+		return Result{Level: Pass, Detail: "image " + image + " can host the runner; " + runnerDir + " is mountable"}
+	}}
+}
+
+func hintOf(err error) string {
+	var h interface{ UserHint() string }
+	if errors.As(err, &h) {
+		return h.UserHint()
+	}
+	return ""
 }

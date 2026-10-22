@@ -20,12 +20,20 @@ func EnvPath(dir string) string { return filepath.Join(dir, ".env") }
 // else: config.sh writes its own lines (LANG, PATH, …) into this file, so it
 // is edited, never replaced. A managed key that is present is corrected in
 // place (the first occurrence is kept, duplicates are dropped); missing ones
-// are appended below EnvMarker. It reports whether the file changed.
-func EnsureEnv(dir string, managed map[string]string) (changed bool, err error) {
+// are appended below EnvMarker. Every line setting one of the absent keys is
+// removed. It reports whether the file changed.
+func EnsureEnv(dir string, managed map[string]string, absent ...string) (changed bool, err error) {
 	for k, v := range managed {
 		if k == "" || strings.ContainsAny(k, "=\r\n") || strings.ContainsAny(v, "\r\n") {
 			return false, fmt.Errorf("invalid env entry %q", k)
 		}
+	}
+	drop := map[string]bool{}
+	for _, k := range absent {
+		if _, both := managed[k]; both || k == "" || strings.ContainsAny(k, "=\r\n") {
+			return false, fmt.Errorf("invalid absent env key %q", k)
+		}
+		drop[k] = true
 	}
 	path := EnvPath(dir)
 	orig, err := os.ReadFile(path)
@@ -54,6 +62,9 @@ func EnsureEnv(dir string, managed map[string]string) (changed bool, err error) 
 			hasMarker = true
 		}
 		key, _, ok := strings.Cut(line, "=")
+		if ok && drop[key] {
+			continue
+		}
 		want, isManaged := managed[key]
 		if !ok || !isManaged {
 			out = append(out, line)

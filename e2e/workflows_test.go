@@ -22,14 +22,16 @@ func read(t *testing.T, name string) string {
 
 func TestWorkflowsTargetTheOwnciRunner(t *testing.T) {
 	tests := []struct {
-		file         string
-		wantContains []string
-		wantMissing  []string
-		jobs         int
+		file          string
+		wantContains  []string
+		wantMissing   []string
+		jobs          int
+		wantContainer bool
 	}{
-		{"ownci-pass.yml", []string{"pull_request:", "workflow_dispatch:", "container: ubuntu:24.04", "actions/checkout@v4", "RUNNER_NAME"}, nil, 1},
-		{"ownci-nocontainer.yml", []string{"workflow_dispatch:"}, []string{"pull_request"}, 1},
-		{"ownci-poison.yml", []string{"workflow_dispatch:", "needs: first", "RUNNER_TOOL_CACHE", "_actions"}, []string{"pull_request"}, 2},
+		{"ownci-pass.yml", []string{"pull_request:", "workflow_dispatch:", "container: ubuntu:24.04", "actions/checkout@v4", "RUNNER_NAME"}, nil, 1, true},
+		{"ownci-nocontainer.yml", []string{"workflow_dispatch:"}, []string{"pull_request"}, 1, false},
+		{"ownci-poison.yml", []string{"workflow_dispatch:", "needs: first", "RUNNER_TOOL_CACHE", "_actions"}, []string{"pull_request"}, 2, true},
+		{"ownci-default-image.yml", []string{"workflow_dispatch:", "needs: first", "sudo -n true", "/var/run/docker.sock", "ownci-poison", ":/mnt/"}, []string{"pull_request"}, 2, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.file, func(t *testing.T) {
@@ -41,8 +43,8 @@ func TestWorkflowsTargetTheOwnciRunner(t *testing.T) {
 				t.Error("must target only the opt-in label")
 			}
 			hasContainer := regexp.MustCompile(`(?m)^\s*container:`).MatchString(s)
-			if wantContainer := tc.file != "ownci-nocontainer.yml"; hasContainer != wantContainer {
-				t.Errorf("declares a job container = %v, want %v", hasContainer, wantContainer)
+			if hasContainer != tc.wantContainer {
+				t.Errorf("declares a job container = %v, want %v", hasContainer, tc.wantContainer)
 			}
 			if strings.Contains(s, "\t") {
 				t.Error("YAML must not contain tabs")
@@ -73,9 +75,24 @@ func TestRunScriptIsExecutableAndGuardsAgainstPublicRepos(t *testing.T) {
 		t.Error("run.sh is not executable")
 	}
 	b, _ := os.ReadFile("run.sh")
-	for _, want := range []string{"set -euo pipefail", "OWNCI_E2E_REPO", `"PUBLIC"`, "Jobs without a job container are forbidden"} {
+	for _, want := range []string{"set -euo pipefail", "OWNCI_E2E_REPO", `"PUBLIC"`, "Jobs without a job container are forbidden", "OWNCI_E2E_MODE", "ownci-default-image.yml"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("run.sh lacks %q", want)
+		}
+	}
+}
+
+// The example image for container-runner mode must keep everything the probe
+// in internal/runnercontainer requires.
+func TestUbuntu22ImageHasTheRunnerDependencies(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("images", "ubuntu22.Dockerfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{"FROM ubuntu:22.04", "libicu70", "liblttng-ust1", "libssl3", "git", "sudo", "docker/docker"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("ubuntu22.Dockerfile lacks %q", want)
 		}
 	}
 }

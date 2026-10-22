@@ -7,7 +7,10 @@ self-hosted runner for one repository, with one command each to set it up,
 start it, stop it and remove it. It does not implement a CI protocol: it
 downloads, registers, supervises and cleans up the **official**
 [`actions/runner`](https://github.com/actions/runner), and configures it so
-that **every job must run inside a Docker container**.
+that **every job runs inside a Docker container**: either the job declares
+`container:` (host mode, the default), or OwnCI runs the runner itself in a
+container that jobs without `container:` use as their image
+([container-runner mode](#run-every-job-in-a-container-no-container-needed)).
 
 > **Status: MVP. Linux and WSL2 only** (amd64 and arm64). Native Windows and
 > macOS are not supported. The first real-GitHub validation is described in
@@ -31,7 +34,8 @@ that **every job must run inside a Docker container**.
   process supervision, status, cleanup, uninstall.
 - A job that does not declare `container:` is **rejected** by the runner. That is the
   isolation boundary OwnCI enforces and verifies; read [Security](#security-and-trust-model)
-  for what it does *not* protect against.
+  for what it does *not* protect against. (In container-runner mode such a job runs in
+  the runner's container instead; see below.)
 
 ## Prerequisites
 
@@ -89,6 +93,59 @@ jobs:
 
 Stop contributing compute with `ownci stop`; `ownci start` brings the same registration back.
 
+### Run every job in a container (no `container:` needed)
+
+Workflows written for GitHub-hosted runners usually have no `container:` line. With
+**container-runner mode** they run unchanged:
+
+```bash
+ownci setup --repo owner/name --mode container-runner    # or: --force --mode container-runner to switch
+ownci start --detach
+```
+
+```yaml
+jobs:
+  build:
+    runs-on: [ownci]           # no container: needed
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y jq && make test
+```
+
+How it works:
+
+```
+ GitHub Actions ◄──────────► official actions/runner, inside a container       (one per job)
+                              image: ghcr.io/actions/actions-runner (Ubuntu 24.04, pinned)
+                              runner dir mounted at the SAME path, Docker socket mounted
+                                 │                               │
+            job without container:                     job with container: X
+            runs right here, as your uid,              the runner asks the host daemon
+            with passwordless sudo                     for X, exactly as in host mode
+```
+
+- **Jobs without `container:`** run inside the runner container, as your user id (files
+  in the runner directory stay yours), with passwordless `sudo` and the Docker CLI.
+- **Jobs with `container:`** behave exactly as in host mode: the job container is a sibling
+  on your Docker daemon.
+- **Every job gets a fresh container.** The runner takes one job (`run.sh --once`), exits,
+  and OwnCI starts a new container for the next one. Anything a job changes outside the
+  workspace (`apt-get install`, `/tmp`, `$HOME`) is gone for the next job; the workspace
+  itself is wiped by the same cleanup hook as in host mode. Expect a few seconds between
+  jobs while the new container connects.
+- The default image is `ghcr.io/actions/actions-runner`, pinned by digest (about 2 GB, pulled
+  once at setup). `--image` (at `setup`, or for one session at `start`) picks another one,
+  e.g. an Ubuntu 22.04 image built from [`e2e/images/ubuntu22.Dockerfile`](e2e/images/ubuntu22.Dockerfile)
+  (`docker build -t my/runner:22.04 -f e2e/images/ubuntu22.Dockerfile .`; a locally built image
+  is used as is, not pulled). It **must** contain `bash`, `setpriv`, `useradd`/`groupadd`/`usermod`,
+  `getent`, `stat`, the `docker` CLI and the ICU library, and **should** contain `git` and `sudo`.
+  `setup` refuses an image that lacks a required tool before registering anything, and
+  `ownci doctor` checks it too.
+- The runner directory must be mountable at its own path: a plain Linux path without
+  symlinks, not under `/mnt/c` (OwnCI refuses otherwise). The default data dir is fine.
+- Not the GitHub-hosted image: the default image has git, curl and the Docker CLI but not
+  the hosted runners' preinstalled toolchains. `actions/setup-*` actions install what you need.
+
 ### One workflow file for a whole team
 
 Give each developer's runner their own label (their GitHub username) and let the workflow
@@ -120,10 +177,10 @@ rather than whoever pushed last.
 |---|---|
 | `ownci version [--json]` | OwnCI version, commit, date, and the runner version when set up. |
 | `ownci doctor [--json]` | Read-only health checks (platform, user, data dir, ICU, Docker, isolation). Exit 3 if one fails. |
-| `ownci setup --repo owner/name` | Download and verify the pinned runner, register it with label `ownci` only, install the isolation settings and cleanup hook. Flags: `--name`, `--labels a,b`, `--force` (re-register in place; refused while the runner runs), `--allow-public-repo`, `--dry-run`, `--download-only`. |
-| `ownci start [--detach]` | Re-asserts isolation, cleans leftovers, starts the runner under supervision (restarts on crashes with backoff). `--wait` sets how long `--detach` waits for "listening". |
+| `ownci setup --repo owner/name` | Download and verify the pinned runner, register it with label `ownci` only, install the isolation settings and cleanup hook. Flags: `--name`, `--labels a,b` (default: keep the current ones), `--mode host\|container-runner` (default: keep the current mode, or host), `--image` (container-runner mode), `--force` (re-register in place, also to switch modes; refused while the runner runs), `--allow-public-repo`, `--dry-run`, `--download-only`. |
+| `ownci start [--detach]` | Re-asserts isolation, cleans leftovers, starts the runner under supervision (restarts on crashes with backoff; in container-runner mode a fresh container per job). `--wait` sets how long `--detach` waits for "listening"; `--image` overrides the runner image for this session (container-runner mode). |
 | `ownci stop [--force]` | Gracefully stops the runner (a running job is cancelled); registration and files are kept. `--timeout` (default 45 s). |
-| `ownci status [--remote] [--json]` | What is *actually* true: installed, registered, process (from a held lock, never from files), runner state, last job, isolation, Docker, last error. `--remote` also asks GitHub. |
+| `ownci status [--remote] [--json]` | What is *actually* true: installed, registered, mode (and the runner container's state), process (from a held lock, never from files), runner state, last job, isolation, Docker, last error. `--remote` also asks GitHub. |
 | `ownci logs [--source runner\|ownci\|supervisor\|diag] [-n N] [-f]` | Tail OwnCI's and the runner's logs (secrets are redacted). |
 | `ownci uninstall [--unregister] [--purge] [--local-only] [--yes] [--name n]` | Stop the runner; optionally remove the GitHub registration and OwnCI's files. Without flags it only stops and explains what is left. |
 
@@ -142,17 +199,20 @@ risk, set the repository's *Fork pull request workflows from outside collaborato
 
 **What OwnCI enforces and checks (every `start`, and in `status` / `doctor`):**
 
-- Jobs must declare `container:` (`ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true`); others fail
-  with *"Jobs without a job container are forbidden on this runner"*. A `start` that cannot
-  establish this refuses to run the runner.
+- Host mode: jobs must declare `container:` (`ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true`);
+  others fail with *"Jobs without a job container are forbidden on this runner"*. A `start`
+  that cannot establish this refuses to run the runner.
+- Container-runner mode: the runner is only ever started inside its container, so a job
+  without `container:` runs there, never directly on your machine. The container is
+  replaced after every job, and the cleanup hook is mounted read-only into it so a job
+  cannot switch the workspace wipe off.
 - After every job the runner's `_work` directory (workspace, `_actions`, `_tool`) is wiped
   by a hook that uses a throwaway, network-less container from a digest-pinned image, so
   root-owned files cannot carry over to the next job. If the cleanup fails, the **job
   fails visibly** rather than silently leaving files behind.
 - The runner is opt-in: it carries only the label `ownci`, so a stray `runs-on: self-hosted`
   never lands on your laptop.
-- The Docker socket is **not** mounted into job containers, and OwnCI uses no privileged
-  containers.
+- OwnCI uses no privileged containers.
 - Your GitHub token is never stored; the registration token is single-use. The runner's own
   credentials live in the runner directory inside the data dir (directories `0700`, secrets
   `0600`). Tokens are redacted from OwnCI's logs and the runner log it captures.
@@ -160,6 +220,12 @@ risk, set the repository's *Fork pull request workflows from outside collaborato
 **What the container boundary does *not* protect against** (a container is not a security
 sandbox for hostile code):
 
+0. **The Docker socket is mounted into job containers.** The official runner mounts
+   `/var/run/docker.sock` into every job container (checked on runner 2.338.0: it is present
+   and the job runs as root). A job can therefore control your Docker daemon, which is
+   effectively root on the machine that runs it: start privileged containers, mount host
+   paths, read other containers' data. For OwnCI this means the container is **not** a
+   barrier against a malicious workflow, only against accidents. Only run workflows you trust.
 1. **Network:** job containers use Docker's default network and can reach the internet and
    your LAN. OwnCI sets no network policy.
 2. **Sibling containers:** `services:`, `uses: docker://…` and Dockerfile actions run as
@@ -173,12 +239,20 @@ sandbox for hostile code):
 5. **The runner itself runs on your host as you.** OwnCI only allows container jobs, but a
    vulnerability in the runner, Docker or a container image is a vulnerability on your machine.
 6. No CPU, memory or disk limits are applied.
+7. **Container-runner mode:** the runner directory is mounted into the runner container, so a
+   job without `container:` runs as your user next to the runner's files, including its
+   registration credentials (`.credentials*`), and can read or change them for the length of
+   that job. With the Docker socket (item 0) it can reach anything on the machine anyway; the
+   mode protects against accidents and leftovers, not against hostile workflows.
 
 OwnCI does **not** claim to safely run arbitrary untrusted pull request code.
 
 ## Limitations
 
 - One job at a time (one runner per data directory).
+- Container-runner mode starts the runner with `run.sh --once`, which the runner marks as
+  deprecated in favor of ephemeral registrations. If a future runner drops it, OwnCI will
+  report the runner as crashing; see [`tasks/future.md`](tasks/future.md).
 - The runner is a plain process: it stops when you stop it, when WSL shuts down (the WSL VM
   can idle-shut-down after your terminals close) or when the machine sleeps. Queued jobs wait
   until it reconnects. Use `ownci start --detach` and keep WSL running (e.g. leave a terminal open).
@@ -207,6 +281,9 @@ Start with `ownci doctor` and `ownci status`. Logs: `ownci logs`, `ownci logs --
 | `[FAIL] isolation` in `doctor` | `ownci start` repairs the `.env`/hook; otherwise `ownci setup --repo … --force`. |
 | `[WARN] isolation` (image missing) | `docker pull <image shown by doctor>` (`ownci start` also pulls it). |
 | `cleanup FAILED` in a job log | Docker unavailable or the image missing; see `<runner>/ownci/last-cleanup.json`, fix Docker, `ownci doctor`. |
+| `runner directory … goes through a symlink` (container-runner mode) | Docker would mount the target under another name. Use the resolved path: `--data-dir $(realpath <dir>)`. |
+| `image … cannot host the runner; it lacks: …` | The `--image` misses tools the runner container needs (plain `ubuntu:22.04` lacks the docker CLI and ICU); use the default image, one derived from it, or one like `e2e/images/ubuntu22.Dockerfile`. |
+| `the runner '…' could not be started (exit code 125)` | Docker refused the runner container (image missing, a mount refused). `ownci doctor`, then `docker pull <image>`. |
 | status phase **`registration_lost`** | The runner was removed on GitHub: `ownci setup --repo … --force` to register again. |
 | status phase **`version_deprecated`** | The runner could not self-update: upgrade ownci, then `ownci setup --repo … --force`. |
 | status phase **`duplicate_session`** | Another process uses this registration (another machine or a leftover process): stop it. |

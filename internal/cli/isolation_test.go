@@ -177,7 +177,7 @@ func TestStatusIsolationLine(t *testing.T) {
 		t.Errorf("before install:\n%s", stdout)
 	}
 
-	if err := isolation.Install(t.Context(), healthyFake(), dir, hooks.CleanupImage); err != nil {
+	if err := isolation.Install(t.Context(), healthyFake(), dir, isolation.HostPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(hooks.LastCleanupPath(dir), []byte(`{"time":"2026-10-15T10:05:41Z","result":"failed","detail":"boom"}`), 0o600); err != nil {
@@ -211,7 +211,7 @@ func TestDoctorIsolationCheck(t *testing.T) {
 		t.Errorf("missing enforcement: exit %d\n%s", code, stdout)
 	}
 
-	if err := isolation.Install(t.Context(), healthyFake(), dir, hooks.CleanupImage); err != nil {
+	if err := isolation.Install(t.Context(), healthyFake(), dir, isolation.HostPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	stdout, _, code = runCLI(t, "--data-dir", p.Root, "doctor")

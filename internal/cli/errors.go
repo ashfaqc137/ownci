@@ -91,3 +91,12 @@ func isUsageError(err error) bool {
 	}
 	return false
 }
+
+// hintOf returns the hint an error carries, or "".
+func hintOf(err error) string {
+	var h hinted
+	if errors.As(err, &h) {
+		return h.UserHint()
+	}
+	return ""
+}

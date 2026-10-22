@@ -11,7 +11,7 @@ OwnCI is an open-source Go CLI (`ownci`) that turns a developer's machine into a
 
 MVP target: **Linux inside WSL2** (and therefore native Linux), amd64 and arm64, GitHub Actions, Docker.
 
-Success = a real PR check in GitHub runs on the developer's machine inside a job container, and a job without a container is rejected. That is verified in t10.
+Success = a real PR check in GitHub runs on the developer's machine inside a job container, and a job without a container is rejected. That is verified in t10. Since t11 (D13) a runner can instead run inside a container, which jobs without `container:` use as their image.
 
 ---
 
@@ -31,6 +31,7 @@ Success = a real PR check in GitHub runs on the developer's machine inside a job
 | D10 | **Per-job cleanup:** the runner's job-completed hook (`ACTIONS_RUNNER_HOOK_JOB_COMPLETED`) runs an OwnCI script that wipes the job workspace, `_actions` and `_tool` under the runner's `_work` dir, using a throwaway container so root-owned files can be removed. | Job containers mount `_work`, `_actions`, `_tool`, `_temp` read-write and run as root by default. On a persistent runner, one job could otherwise poison the next. |
 | D11 | **One runner per data dir for the MVP**, but the on-disk layout is per-name (`runners/<name>/`) so multiple runners can come later without migration. | Cheap future-proofing. |
 | D12 | **Testing:** unit tests + fakes only (no network, no Docker, no real GitHub) through t09. Real GitHub E2E happens in **t10** only. | User decision. |
+| D13 | **Runner-in-container mode (opt-in, t11):** `setup --mode container-runner` runs the official runner inside a container from a pinned image (`ghcr.io/actions/actions-runner`, digest-pinned in `internal/runnercontainer`). The runner directory is mounted at the **same path**, the Docker socket is mounted, the entrypoint maps the container user to the **host uid** (with passwordless sudo) and the runner runs `run.sh --once`, so every job gets a **fresh container**. Jobs without `container:` run in that image; jobs with one use theirs. `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER` is removed from `.env` in this mode. Host mode (D1) stays the default. | Container hooks are not called for no-container jobs (spiked 2026-10-22), so a default image needs the runner itself in a container. Same-path mounts are required because the runner hands its own paths to the host daemon. Per-job recycling keeps D10's "nothing persists" true for no-container jobs. |
 
 ---
 
@@ -61,6 +62,8 @@ ownci/
 │   ├── supervisor/             # lock, pidfile, state machine, start/stop t07
 │   ├── hooks/                  # embedded hook scripts + cleanup image    t08
 │   ├── isolation/              # install/verify enforcement + cleanup     t08
+│   ├── runnercontainer/        # container-runner mode: docker run args,
+│   │                           # entrypoint, path checks, image probe     t11
 │   ├── uninstall/              # stop/unregister/purge                    t09
 │   ├── logtail/                # tail / follow for `ownci logs`           t09
 │   └── testutil/               # fake runner tarball, helpers             t04+
@@ -110,7 +113,9 @@ Permissions: directories `0700`, files containing config `0600`. The data dir sh
     "url": "https://github.com/owner/name",
     "labels": ["ownci"],
     "installedVersion": "2.xxx.x",
-    "isolation": "docker-job-container",
+    "isolation": "docker-job-container",   // "docker-runner-container" in container-runner mode
+    "mode": "container-runner",            // t11; absent = "host"
+    "image": "ghcr.io/actions/actions-runner:…@sha256:…",  // container-runner mode only
     "createdAt": "RFC3339"
   }
 }
@@ -197,12 +202,13 @@ Permissions: directories `0700`, files containing config `0600`. The data dir sh
 ### `.env` file (runner root)
 - `Runner.Listener` reads `<runnerdir>/.env` at startup. Each non-empty line `KEY=VALUE` (split on the first `=`) is set as an env var. **No quoting, no comment syntax**: don't write quotes, and don't write comment lines that contain `=`. Workers inherit these vars.
 - `config.sh` itself writes `.env` (e.g. `LANG`, `PATH`). OwnCI must **merge** into it, never overwrite it.
-- OwnCI-managed keys (t08): `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true`, `ACTIONS_RUNNER_HOOK_JOB_COMPLETED=<abs path to hook>`, `OWNCI_RUNNER_ROOT=<runnerDir>`, `OWNCI_CLEANUP_IMAGE=<pinned image>`.
+- OwnCI-managed keys (t08): `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true`, `ACTIONS_RUNNER_HOOK_JOB_COMPLETED=<abs path to hook>`, `OWNCI_RUNNER_ROOT=<runnerDir>`, `OWNCI_CLEANUP_IMAGE=<pinned image>`. In container-runner mode (t11) `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER` is removed instead.
+- `config.sh` (via `env.sh`) also writes **`.path`** with the `PATH` of the shell that ran it (on WSL including `/mnt/c/...` entries), for the runner to use for jobs. In container-runner mode the entrypoint rewrites it with the container's `PATH` before every launch; the `ownci-default-image` e2e job asserts its `PATH` has no `/mnt/` entries.
 - Job hooks (`ACTIONS_RUNNER_HOOK_JOB_STARTED` / `_COMPLETED`) run **on the host** as the runner user (`JobHookProvider` uses the default step host), and their output appears in the job log visible to repo users. A failing hook fails the job.
 
 ### What a container job exposes (`ContainerOperationProvider.MountWellKnownDirectories`)
 - Read-write bind mounts from the host: `_work` (incl. workspace), `_work/_temp`, `_work/_actions`, `_work/_tool`. `externals` is mounted read-only.
-- The Docker socket is **not** mounted into the job container by default.
+- CORRECTION (2026-10-22): the official runner **does** mount `/var/run/docker.sock` into every job container (verified on runner 2.338.0 with a real job, and visible in the container-hook `prepare_job` payload as a `systemMountVolumes` entry). The earlier claim here that it is not mounted was wrong.
 - `services:`, `uses: docker://…` and Dockerfile actions run as **sibling containers** on the host Docker daemon. This is a documented limitation.
 - Job containers run as **root** by default, so files they create in `_work` are root-owned on the host. The runner cleans `_work/_temp` itself per job, but may fail on root-owned files.
 
@@ -216,6 +222,14 @@ Permissions: directories `0700`, files containing config `0600`. The data dir sh
 | Delete runner | `DELETE /repos/{owner}/{repo}/actions/runners/{id}` | `204` |
 
 Required permission: repo **admin** (fine-grained PAT: *Administration: Read and write*; classic PAT: `repo`). `gh auth login` default scopes usually suffice for repos the user administers.
+
+### Runner in a container (t11, verified 2026-10-22 on runner 2.338.0, Docker Desktop 29.5 + WSL2)
+- Official image `ghcr.io/actions/actions-runner:2.338.0`: Ubuntu 24.04, users `ubuntu` (uid 1000) and `runner` (uid 1001, sudo), Docker CLI, git, `setpriv`; no ENTRYPOINT; env `ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT=1` (OwnCI unsets it so stdout keeps the §7 markers and `_diag` keeps the log).
+- The runner passes its own paths (`externals`, `_work`, …) to the **host** daemon as bind-mount sources for job containers, so the runner directory must be mounted at the identical path.
+- The data dir is `0700` and owned by the host user, so the runner must run as the **host uid** inside the container (the image's uid 1001 cannot even read it). The entrypoint (run as root) creates or reuses the passwd entry for that uid, adds it to the group owning the socket and to sudoers, rewrites `.path`, then `setpriv`s to it.
+- `docker run --init` + the docker CLI's signal proxy deliver SIGINT to `run.sh`; exit codes (incl. 7) propagate through `docker run`. Docker's own failures are 125 (daemon: image missing, name conflict), 126/127 (entrypoint).
+- `run.sh --once` still works in 2.338.0 (prints a deprecation warning): the listener takes one job and exits 0 after it.
+- The cleanup hook works unchanged inside the container (same paths, docker CLI + socket); a read-only bind mount of the hook file over itself blocks writes (`EROFS`) and renames (`EBUSY`).
 
 ### Docker Desktop + WSL
 - If Docker Desktop is installed but WSL integration is **off** for the distro, the `docker` command is a shim that prints *"The command 'docker' could not be found in this WSL 2 distro. We recommend to activate the WSL integration in Docker Desktop settings."* and exits non-zero. Detect this text and hint: *Docker Desktop → Settings → Resources → WSL integration → enable for this distro.* (This is the state of the author's machine at the time of writing.)

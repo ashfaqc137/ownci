@@ -19,9 +19,12 @@ import (
 
 	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/execx"
+	"github.com/ashfaqc137/ownci/internal/hooks"
+	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/logging"
 	"github.com/ashfaqc137/ownci/internal/platform"
 	"github.com/ashfaqc137/ownci/internal/runner"
+	"github.com/ashfaqc137/ownci/internal/runnercontainer"
 	"github.com/ashfaqc137/ownci/internal/testutil/fakegh"
 )
 
@@ -239,7 +242,7 @@ func TestHappyPath(t *testing.T) {
 		"✓ Preflight checks passed (platform, user, data-dir, docker)",
 		"✓ GitHub token from GITHUB_TOKEN",
 		"✓ Runner registered on GitHub (id ",
-		"✓ OwnCI is set up for me/demo as runner 'ownci-box' (labels: ownci)",
+		"✓ OwnCI is set up for me/demo as runner 'ownci-box' (labels: ownci, mode: host)",
 		"ownci start", "runs-on: [ownci]", "jobs without 'container:' will be rejected",
 	} {
 		if !strings.Contains(out, want) {
@@ -603,5 +606,200 @@ func TestInvalidInputs(t *testing.T) {
 	wantErr(t, e.run(Options{Name: "../evil"}), "invalid runner name", "a-z")
 	if e.reqs.Load() != 0 {
 		t.Error("requests made for invalid input")
+	}
+}
+
+func dockerCalls(f *execx.Fake, sub string) []string {
+	var out []string
+	for _, c := range f.Calls() {
+		if c.Name == "docker" && len(c.Args) > 0 && c.Args[0] == sub {
+			out = append(out, strings.Join(c.Args, " "))
+		}
+	}
+	return out
+}
+
+func TestContainerRunnerMode(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	e.fake.On("docker", "run").Stdout("ok\n") // the image probe
+	if err := e.run(Options{Mode: config.ModeContainerRunner}); err != nil {
+		t.Fatal(err)
+	}
+	rc := e.loadConfig()
+	if rc.Mode != config.ModeContainerRunner || rc.Image != runnercontainer.DefaultImage || rc.Isolation != IsolationRunnerContainer {
+		t.Errorf("config = %+v", rc)
+	}
+	dir := e.runnerDir("ownci-box")
+	env, _ := runner.ReadEnv(dir)
+	if _, ok := env[isolation.EnvRequireContainer]; ok {
+		t.Errorf(".env requires job containers in container-runner mode: %v", env)
+	}
+	if env[isolation.EnvHookCompleted] == "" {
+		t.Errorf(".env lacks the cleanup hook: %v", env)
+	}
+	pulls := strings.Join(dockerCalls(e.fake, "pull"), "\n")
+	if !strings.Contains(pulls, hooks.CleanupImage) || !strings.Contains(pulls, runnercontainer.DefaultImage) {
+		t.Errorf("pulls:\n%s", pulls)
+	}
+	if runs := dockerCalls(e.fake, "run"); len(runs) != 1 || !strings.Contains(runs[0], "ownci-probe") {
+		t.Errorf("probe runs = %v", runs)
+	}
+	out := e.out.String()
+	for _, want := range []string{"✓ Runner image " + runnercontainer.DefaultImage + " is ready", "mode: container-runner", "jobs without 'container:' run in"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, out)
+		}
+	}
+
+	// --force without --mode keeps the mode; --mode host switches back and
+	// restores the job-container requirement.
+	if err := e.run(Options{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if rc := e.loadConfig(); rc.Mode != config.ModeContainerRunner {
+		t.Errorf("mode after --force = %q", rc.Mode)
+	}
+	if err := e.run(Options{Force: true, Mode: config.ModeHost}); err != nil {
+		t.Fatal(err)
+	}
+	rc = e.loadConfig()
+	if rc.EffectiveMode() != config.ModeHost || rc.Image != "" || rc.Isolation != IsolationMode {
+		t.Errorf("config after switching to host = %+v", rc)
+	}
+	if env, _ := runner.ReadEnv(dir); env[isolation.EnvRequireContainer] != "true" {
+		t.Errorf(".env after switching to host = %v", env)
+	}
+	e.assertNoSecrets()
+}
+
+func TestContainerRunnerCustomImageAndProbeFailure(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	e.fake.On("docker", "run").Exit(3).Stdout("missing: libicu\n")
+	err := e.run(Options{Mode: config.ModeContainerRunner, Image: "ubuntu:24.04"})
+	wantErr(t, err, "image ubuntu:24.04 cannot host the runner; it lacks: libicu", "docker CLI")
+	e.noConfig()
+	// Refused before anything is registered, here or on GitHub.
+	if runner.Registered(e.runnerDir("ownci-box")) || len(fakeLabels(e, "me/demo")) != 0 || len(e.fg.Snapshot().Tokens) != 0 {
+		t.Error("a bad runner image was only found after registering")
+	}
+	if pulls := strings.Join(dockerCalls(e.fake, "pull"), "\n"); !strings.Contains(pulls, "ubuntu:24.04") {
+		t.Errorf("custom image not pulled:\n%s", pulls)
+	}
+}
+
+func TestModeFlagValidation(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	var se *Error
+	err := e.run(Options{Mode: "vm"})
+	if !errors.As(err, &se) || !se.Usage || !strings.Contains(se.Hint, config.ModeContainerRunner) {
+		t.Errorf("unknown mode: %v", err)
+	}
+	err = e.run(Options{Image: "ubuntu:24.04"})
+	if !errors.As(err, &se) || !se.Usage || !strings.Contains(err.Error(), "--image needs --mode container-runner") {
+		t.Errorf("--image in host mode: %v", err)
+	}
+	if n := e.reqs.Load(); n != 0 {
+		t.Errorf("%d GitHub requests before validating flags", n)
+	}
+}
+
+func TestContainerRunnerRefusesSymlinkedDataDir(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(e.deps.Paths.Root, link); err != nil {
+		t.Fatal(err)
+	}
+	e.deps.Paths = config.NewPaths(link)
+	wantErr(t, e.run(Options{Mode: config.ModeContainerRunner}), "goes through a symlink", "--data-dir")
+	if n := len(e.fg.Snapshot().Tokens); n != 0 {
+		t.Errorf("requested %d tokens before refusing", n)
+	}
+}
+
+func TestContainerRunnerDryRun(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	if err := e.run(Options{DryRun: true, Mode: config.ModeContainerRunner, Image: "my/runner:1"}); err != nil {
+		t.Fatal(err)
+	}
+	if out := e.out.String(); !strings.Contains(out, "Would pull and probe the runner image my/runner:1 (mode container-runner") {
+		t.Errorf("dry-run output:\n%s", out)
+	}
+	if len(dockerCalls(e.fake, "pull")) != 0 || len(dockerCalls(e.fake, "run")) != 0 {
+		t.Errorf("dry-run touched Docker: %v", e.fake.Calls())
+	}
+	e.noConfig()
+}
+
+// A failed re-registration (--force) puts the previous registration back, so
+// the runner keeps working with it.
+func TestForceReRegistrationFailureRestoresTheOldRegistration(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	if err := e.run(Options{}); err != nil {
+		t.Fatal(err)
+	}
+	dir := e.runnerDir("ownci-box")
+	before, err := os.ReadFile(filepath.Join(dir, ".runner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.sh"), []byte("#!/usr/bin/env bash\necho 'boom'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wantErr(t, e.run(Options{Force: true}), "config.sh failed", "")
+	after, err := os.ReadFile(filepath.Join(dir, ".runner"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Errorf(".runner not restored: %v\n%s", err, after)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "*.ownci-previous")); len(matches) != 0 {
+		t.Errorf("set-aside files left: %v", matches)
+	}
+}
+
+func TestForceKeepsLabelsUnlessGiven(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	if err := e.run(Options{Labels: []string{"alice"}}); err != nil {
+		t.Fatal(err)
+	}
+	labels := func() string { return strings.Join(e.loadConfig().Labels, ",") }
+	if err := e.run(Options{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := labels(); got != "ownci,alice" {
+		t.Errorf("labels after --force = %q, want them kept", got)
+	}
+	if got := fakeLabels(e, "me/demo"); len(got) != 1 || strings.Join(got[0], ",") != "ownci,alice" {
+		t.Errorf("GitHub labels after --force = %v", got)
+	}
+	if err := e.run(Options{Force: true, Labels: []string{"bob"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := labels(); got != "ownci,bob" {
+		t.Errorf("labels after --labels bob = %q", got)
+	}
+	if err := e.run(Options{Force: true, Labels: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := labels(); got != "ownci" {
+		t.Errorf(`labels after --labels "" = %q`, got)
+	}
+}
+
+func TestContainerRunnerLocalImageAndProbeWarnings(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	// A locally built image: present, in no registry, so it must not be pulled.
+	e.fake.On("docker", "image", "inspect").Stdout("sha256:local")
+	e.fake.On("docker", "pull").Exit(1).Stderr("pull access denied")
+	e.fake.On("docker", "run").Stdout("optional: sudo\nok\n")
+	if err := e.run(Options{Mode: config.ModeContainerRunner, Image: "ownci-test/ubuntu22:1"}); err != nil {
+		t.Fatal(err)
+	}
+	if pulls := dockerCalls(e.fake, "pull"); len(pulls) != 0 {
+		t.Errorf("present images were pulled: %v", pulls)
+	}
+	if rc := e.loadConfig(); rc.Image != "ownci-test/ubuntu22:1" {
+		t.Errorf("image = %q", rc.Image)
+	}
+	if !strings.Contains(e.errOut.String(), "Warning: runner image ownci-test/ubuntu22:1: sudo is missing") {
+		t.Errorf("stderr:\n%s", e.errOut.String())
 	}
 }

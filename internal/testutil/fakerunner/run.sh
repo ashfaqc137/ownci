@@ -39,6 +39,14 @@ stop() {
 }
 trap stop INT TERM
 
+# --once (container-runner mode): take one job, then exit like the real
+# listener does after it.
+once=0
+for a in "$@"; do
+  [ "$a" = "--once" ] && once=1
+done
+[ "$once" = 0 ] || say "Warning: '--once' is going to be deprecated in the future, please consider using '--ephemeral' during runner registration."
+
 say "√ Connected to GitHub"
 say "Current runner version: '$VERSION'"
 
@@ -77,6 +85,9 @@ while true; do
       fi
     fi
     say "$(ts): Job $job completed with result: $result"
+    if [ "$once" = 1 ]; then
+      exit 0
+    fi
   fi
   sleep 0.2 &
   wait $!

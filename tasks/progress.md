@@ -17,6 +17,7 @@
 | t08 | Isolation enforcement + cleanup hook | ✅ | – | – | |
 | t09 | `uninstall` / `logs` | ✅ | – | – | |
 | t10 | Real E2E, docs, release | ⚠️ | – | – | Offline parts done (assets, docs, README, `make release`). **Real-GitHub runbook not executed**; `docs/acceptance.md` is all unchecked. |
+| t11 | Runner-in-container mode (default job image) | ✅ | – | – | `setup --mode container-runner` (D13). Real-GitHub e2e passed 2026-10-22 (`ashfaqc137/blog` PR #4; custom Ubuntu 22.04 image and `start --image`: PR #5). Runner self-update inside the container not exercised (see open items). |
 
 Legend: – not started · 🚧 in progress · ✅ done · ⚠️ done with caveats (see Notes)
 
@@ -38,12 +39,19 @@ Post-release ideas are collected in [`future.md`](future.md).
 - [ ] (t10 → user) Execute `docs/e2e.md` against a private sandbox repo (needs `OWNCI_E2E_REPO`, an admin token, Docker) and record the evidence in `docs/acceptance.md`; fill the Findings table. Status 2026-10-15: steps 3 and 5-12 were exercised ad hoc on private `ashfaqc137/blog` (PR #1, workflows triggered by `pull_request` rather than `workflow_dispatch`) and passed: setup, start, container job, no-container rejection, poison/wipe, stop/restart keeps runner id 21 and the PR check passes, kill test, no secrets in logs, `uninstall --unregister --purge --yes`. Not run: step 4 (public repo refused, needs a public repo you administer) and step 2/6 via `e2e/run.sh`. Evidence is not yet copied into `docs/acceptance.md`.
 - [x] (t10 → future) Resolved (2026-10-15): before every launch the supervisor (which holds the runner lock) kills processes still running from the runner directory and logs a notice (`internal/supervisor/orphans.go`, test `TestRunKillsLeftoverRunnerProcesses`). Not yet re-verified against real GitHub. Original item: After `kill -9` of the supervisor the `Runner.Listener` survives and holds the GitHub session; `ownci start` then spawns a second listener that loops on "A session for this runner already exists … Conflict" and `start` only says "still starting". Recovery worked after killing the orphan by hand. Consider having `start` detect and stop an orphaned listener of its own runner directory (found 2026-10-15, e2e step 10)
 - [x] (t10) Resolved (2026-10-15): MIT, `LICENSE` added and linked from the README. Original item: decide on a license (README placeholder until then)
+- [ ] (t10 → future) The runner mounts the Docker socket into every job container (verified 2026-10-22), so a job can control the host Docker daemon. README and task docs are corrected. Decide whether to harden (custom container hook that drops the mount, see `future.md` F2) or keep it as a documented limitation
+- [ ] (t11 → user/future) Runner self-update inside the runner container is untested: 2.338.0 is the latest release, so GitHub offered no update during the e2e. Re-check when the next runner release ships (`ownci status` shows the new version and jobs keep running) — or force it by setting up with an older runner through a dev build (`OWNCI_DEV_RUNNER_URL`/`_SHA256`)
+- [x] (t11) Resolved 2026-10-22: `setup --force` on a registered runner failed with the real `config.sh` (it refuses an existing `.runner` even with `--replace`); the old registration is now set aside and restored on failure. Also `--force` no longer drops extra labels. Both found by the t11 e2e; details in t11 Implementation notes
+- [ ] (t11 → future) `run.sh --once` is deprecated by the runner; replace it before a runner release removes it (`future.md` F3)
+- [ ] (t11 → future) Container-runner mode lets no-container jobs read/modify the runner dir (incl. `.credentials*`); hardening ideas in `future.md` F4
+- [ ] (t11 → user) Container-runner mode was verified on Docker Desktop + WSL2 only; re-run `docs/e2e.md` "Container-runner mode" on native Linux Docker Engine
 
 ## Decision changes
 
 <!-- Any change to a decision (D#) in 00-context.md or to a task spec made during review. Also edit the source doc. -->
 | Date | Change | Affects |
 |------|--------|---------|
+| 2026-10-22 | **D13 added** (runner-in-container mode, opt-in). The five t11 "Decisions to confirm" taken as proposed, except #5 (user): the runner runs as the **host uid** through a root entrypoint that adds a passwd entry, sudo and the socket group (the `0700` data dir rules out the image's uid 1001). Added beyond the spec: a **fresh container per job** (`run.sh --once` + supervisor recycle), `.path` rewrite, graceful `docker stop` before removing a container. D1 unchanged and still the default. | t11, 00-context D13/§7, README |
 
 ## Environment notes
 
@@ -52,3 +60,4 @@ Post-release ideas are collected in [`future.md`](future.md).
 - Docker: Docker Desktop on Windows; WSL integration **on** as of 2026-10-15 (the real `docker` preflight passed).
 - Pinned runner version: 2.338.0 (pinned 2026-10-15)
 - Cleanup image: `busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e` (set in t08, `internal/hooks/image.go`)
+- Runner image (container-runner mode): `ghcr.io/actions/actions-runner:2.338.0@sha256:4ffadc0002b2581327e06101fc8c06cd189232baf79fe561fac9caeb76f5e807` (set in t11, `internal/runnercontainer`); Docker Desktop 29.5.3 at the time, socket gid 1001 inside containers

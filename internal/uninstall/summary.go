@@ -45,5 +45,5 @@ func (r *run) printSummary() {
 	} else {
 		fmt.Fprintf(w, "  %-16s kept at %s (use --purge to remove)\n", "Local files", r.d.Paths.Root)
 	}
-	fmt.Fprintf(w, "  %-16s Docker images (busybox cleanup image, job images) — remove with 'docker image prune' if desired\n", "Not touched")
+	fmt.Fprintf(w, "  %-16s Docker images (busybox cleanup image, the runner image of container-runner mode, job images) — remove with 'docker image prune' if desired\n", "Not touched")
 }

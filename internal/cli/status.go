@@ -15,9 +15,9 @@ import (
 	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/docker"
 	"github.com/ashfaqc137/ownci/internal/github"
-	"github.com/ashfaqc137/ownci/internal/hooks"
 	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/runner"
+	"github.com/ashfaqc137/ownci/internal/runnercontainer"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
 	"github.com/spf13/cobra"
 )
@@ -63,6 +63,12 @@ type statusReport struct {
 
 	Isolation *isolation.Report `json:"isolation,omitempty"`
 
+	// Mode is the execution mode (host or container-runner); Container is
+	// Docker's view of the runner container in container-runner mode.
+	Mode      string           `json:"mode,omitempty"`
+	Image     string           `json:"image,omitempty"`
+	Container *containerStatus `json:"container,omitempty"`
+
 	LastError string `json:"lastError,omitempty"`
 }
 
@@ -81,6 +87,13 @@ type githubStatus struct {
 	Busy    bool   `json:"busy"`
 	Error   string `json:"error,omitempty"`
 	Warning string `json:"warning,omitempty"`
+}
+
+type containerStatus struct {
+	Name  string `json:"name"`
+	State string `json:"state"` // running, exited, … or "none"
+	Image string `json:"image,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type dockerStatus struct {
@@ -216,9 +229,24 @@ func gatherStatus(ctx context.Context, app *App, remote bool) *statusReport {
 		rep.Docker.Detail = dst.Err.Error()
 	}
 
+	pol := isolation.PolicyFor(rc, "")
+	rep.Mode, rep.Image = pol.Mode, pol.RunnerImage
 	if rep.RunnerDirSet {
-		iso := isolation.Verify(ctx, ex, dir, hooks.CleanupImage)
+		iso := isolation.Verify(ctx, ex, dir, pol)
 		rep.Isolation = &iso
+	}
+	if pol.Mode == config.ModeContainerRunner && dst.OK() {
+		cs := &containerStatus{Name: runnercontainer.ContainerName(rc.Name)}
+		info, err := runnercontainer.Inspect(ctx, ex, rc.Name)
+		switch {
+		case errors.Is(err, runnercontainer.ErrNoContainer):
+			cs.State = "none"
+		case err != nil:
+			cs.Error = err.Error()
+		default:
+			cs.State, cs.Image = info.State, info.Image
+		}
+		rep.Container = cs
 	}
 
 	if remote {
@@ -287,6 +315,7 @@ func renderStatus(w io.Writer, r *statusReport) {
 	}
 
 	row("Runner", "%s  →  %s   labels: %s", r.Runner.Name, r.Runner.Repo, strings.Join(r.Runner.Labels, ","))
+	row("Mode", "%s", modeLine(r))
 	if r.Installed {
 		row("Installed", "yes  (runner %s at %s)", orDash(r.RunnerVersion), r.Runner.Dir)
 	} else {
@@ -371,6 +400,24 @@ func renderState(row func(string, string, ...any), r *statusReport) {
 	}
 }
 
+func modeLine(r *statusReport) string {
+	if r.Mode != config.ModeContainerRunner {
+		return config.ModeHost + "  (runner on this machine; jobs must declare container:)"
+	}
+	line := fmt.Sprintf("%s  (image %s)", r.Mode, r.Image)
+	if c := r.Container; c != nil {
+		switch {
+		case c.Error != "":
+			line += fmt.Sprintf("   container %s: unknown (%s)", c.Name, c.Error)
+		case c.Image != "" && c.Image != r.Image:
+			line += fmt.Sprintf("   container %s: %s (image %s)", c.Name, c.State, c.Image)
+		default:
+			line += fmt.Sprintf("   container %s: %s", c.Name, c.State)
+		}
+	}
+	return line
+}
+
 func isolationLine(i *isolation.Report) string {
 	mark := func(ok bool) string { return yesNo(ok, "✓", "✗") }
 	last := i.LastCleanup.Result
@@ -379,6 +426,11 @@ func isolationLine(i *isolation.Report) string {
 		if i.LastCleanup.Result == "failed" && i.LastCleanup.Detail != "" {
 			last += " (" + i.LastCleanup.Detail + ")"
 		}
+	}
+	if i.JobContainerRequired == nil {
+		runnerImage := i.RunnerImage != nil && i.RunnerImage.OK
+		return fmt.Sprintf("runner image %s   cleanup hook %s   cleanup image %s   last cleanup: %s",
+			mark(runnerImage), mark(i.CleanupHook.OK), mark(i.CleanupImage.OK), last)
 	}
 	return fmt.Sprintf("container jobs required %s   cleanup hook %s   cleanup image %s   last cleanup: %s",
 		mark(i.JobContainerRequired.OK), mark(i.CleanupHook.OK), mark(i.CleanupImage.OK), last)

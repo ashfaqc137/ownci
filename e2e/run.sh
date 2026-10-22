@@ -3,6 +3,11 @@
 # source of truth; this script automates its steps 6-8 using only `gh`.
 #
 #   OWNCI_E2E_REPO=owner/sandbox ./e2e/run.sh
+#   OWNCI_E2E_MODE=container-runner OWNCI_E2E_REPO=owner/sandbox ./e2e/run.sh
+#
+# OWNCI_E2E_MODE is the mode the runner was set up with (default: host). In
+# host mode a job without a container must be rejected; in container-runner
+# mode it must run in the runner's image, in a fresh container per job.
 #
 # Needs: gh (logged in, admin on the repo), a running runner ('ownci start
 # --detach'), and a PRIVATE sandbox repo with a commit on its default branch.
@@ -14,6 +19,11 @@ set -euo pipefail
 
 : "${OWNCI_E2E_REPO:?set OWNCI_E2E_REPO=owner/name of the private sandbox repo}"
 repo="$OWNCI_E2E_REPO"
+mode="${OWNCI_E2E_MODE:-host}"
+case "$mode" in
+  host | container-runner) ;;
+  *) echo "OWNCI_E2E_MODE must be host or container-runner" >&2; exit 2 ;;
+esac
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 stamp="$(date -u +%Y%m%d-%H%M%S)"
 timeout_s="${OWNCI_E2E_TIMEOUT:-600}"
@@ -98,20 +108,38 @@ else
   record "PR check (ownci-pass)" FAIL "no run appeared; is the runner listening? ('ownci status --remote')"
 fi
 
-# --- 2. a job without a container must be rejected ---------------------------
-say "dispatching ownci-nocontainer.yml"
-since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-gh workflow run ownci-nocontainer.yml -R "$repo" --ref "$base" > /dev/null
-if run_id="$(find_run ownci-nocontainer.yml workflow_dispatch "$since")"; then
-  conclusion="$(wait_run "$run_id")"
-  if [ "$conclusion" = "failure" ] &&
-    gh run view "$run_id" -R "$repo" --log-failed 2>/dev/null | grep -q "Jobs without a job container are forbidden"; then
-    record "no container is rejected" PASS "run $run_id failed with the expected message"
+# --- 2. a job without a container: rejected (host) or run in the default image -
+if [ "$mode" = container-runner ]; then
+  say "dispatching ownci-default-image.yml"
+  since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  gh workflow run ownci-default-image.yml -R "$repo" --ref "$base" > /dev/null
+  if run_id="$(find_run ownci-default-image.yml workflow_dispatch "$since")"; then
+    conclusion="$(wait_run "$run_id")"
+    if [ "$conclusion" = "success" ]; then
+      record "no container runs in the default image" PASS "run $run_id"
+    else
+      record "no container runs in the default image" FAIL "conclusion: $conclusion (run $run_id)"
+    fi
   else
-    record "no container is rejected" FAIL "conclusion: $conclusion, or the message is missing (run $run_id)"
+    record "no container runs in the default image" FAIL "no run appeared"
   fi
-else
-  record "no container is rejected" FAIL "no run appeared"
+fi
+
+if [ "$mode" = host ]; then
+  say "dispatching ownci-nocontainer.yml"
+  since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  gh workflow run ownci-nocontainer.yml -R "$repo" --ref "$base" > /dev/null
+  if run_id="$(find_run ownci-nocontainer.yml workflow_dispatch "$since")"; then
+    conclusion="$(wait_run "$run_id")"
+    if [ "$conclusion" = "failure" ] &&
+      gh run view "$run_id" -R "$repo" --log-failed 2>/dev/null | grep -q "Jobs without a job container are forbidden"; then
+      record "no container is rejected" PASS "run $run_id failed with the expected message"
+    else
+      record "no container is rejected" FAIL "conclusion: $conclusion, or the message is missing (run $run_id)"
+    fi
+  else
+    record "no container is rejected" FAIL "no run appeared"
+  fi
 fi
 
 # --- 3. nothing persists between jobs ----------------------------------------

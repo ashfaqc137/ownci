@@ -21,6 +21,13 @@ type Config struct {
 	Runner        *RunnerConfig `json:"runner,omitempty"`
 }
 
+// Execution modes (D1, D13). An empty Mode in config.json is host mode, so
+// configs written before t11 keep working.
+const (
+	ModeHost            = "host"             // runner on the host, jobs must declare container:
+	ModeContainerRunner = "container-runner" // runner in a container, which is the default job image
+)
+
 // RunnerConfig describes the registered runner (filled by setup, t06).
 type RunnerConfig struct {
 	Name             string    `json:"name"`
@@ -30,8 +37,21 @@ type RunnerConfig struct {
 	Labels           []string  `json:"labels"`
 	InstalledVersion string    `json:"installedVersion"`
 	Isolation        string    `json:"isolation"`
+	Mode             string    `json:"mode,omitempty"`
+	Image            string    `json:"image,omitempty"` // runner image (container-runner mode)
 	CreatedAt        time.Time `json:"createdAt"`
 }
+
+// EffectiveMode is Mode with the pre-t11 default applied.
+func (r *RunnerConfig) EffectiveMode() string {
+	if r.Mode == "" {
+		return ModeHost
+	}
+	return r.Mode
+}
+
+// ValidMode reports whether m names a supported execution mode.
+func ValidMode(m string) bool { return m == ModeHost || m == ModeContainerRunner }
 
 const resetHint = "re-run 'ownci setup --force' to recreate it"
 
@@ -55,6 +75,12 @@ func Load(p Paths) (*Config, error) {
 	}
 	if c.Runner == nil {
 		return nil, ErrNotConfigured
+	}
+	if c.Runner.Mode != "" && !ValidMode(c.Runner.Mode) {
+		return nil, fmt.Errorf("%s has unknown mode %q; %s", p.ConfigFile, c.Runner.Mode, resetHint)
+	}
+	if c.Runner.EffectiveMode() == ModeContainerRunner && c.Runner.Image == "" {
+		return nil, fmt.Errorf("%s uses mode %q without an image; %s", p.ConfigFile, ModeContainerRunner, resetHint)
 	}
 	return &c, nil
 }

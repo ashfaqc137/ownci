@@ -212,8 +212,10 @@ func TestLoadNotConfigured(t *testing.T) {
 
 func TestLoadErrors(t *testing.T) {
 	for name, content := range map[string]string{
-		"bad json":       "{nope",
-		"unknown schema": `{"schemaVersion": 2, "runner": {"name": "x"}}`,
+		"bad json":                 "{nope",
+		"unknown schema":           `{"schemaVersion": 2, "runner": {"name": "x"}}`,
+		"unknown mode":             `{"schemaVersion": 1, "runner": {"name": "x", "mode": "vm"}}`,
+		"container mode, no image": `{"schemaVersion": 1, "runner": {"name": "x", "mode": "container-runner"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := ensured(t)
@@ -228,5 +230,38 @@ func TestLoadErrors(t *testing.T) {
 				t.Errorf("err should name path and hint: %v", err)
 			}
 		})
+	}
+}
+
+func TestModes(t *testing.T) {
+	p := ensured(t)
+	// A config written before t11 has no mode: it is host mode.
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"schemaVersion": 1, "runner": {"name": "x", "isolation": "docker-job-container"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil || c.Runner.EffectiveMode() != ModeHost || c.Runner.Mode != "" {
+		t.Fatalf("legacy config: %+v %v", c, err)
+	}
+	// Container mode round-trips with its image; host mode omits both keys.
+	c.Runner.Mode, c.Runner.Image = ModeContainerRunner, "img@sha256:abc"
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	c, err = Load(p)
+	if err != nil || c.Runner.EffectiveMode() != ModeContainerRunner || c.Runner.Image != "img@sha256:abc" {
+		t.Fatalf("container config: %+v %v", c, err)
+	}
+	c.Runner.Mode, c.Runner.Image = "", ""
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p.ConfigFile); strings.Contains(string(b), `"mode"`) || strings.Contains(string(b), `"image"`) {
+		t.Errorf("host config should omit mode/image:\n%s", b)
+	}
+	for m, want := range map[string]bool{ModeHost: true, ModeContainerRunner: true, "": false, "vm": false} {
+		if ValidMode(m) != want {
+			t.Errorf("ValidMode(%q) = %v", m, !want)
+		}
 	}
 }

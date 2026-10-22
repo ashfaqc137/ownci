@@ -55,7 +55,10 @@ if [ -z "$url" ] || [ -z "$token" ] || [ -z "$name" ]; then
   echo "Error: --url, --token and --name are required"
   exit 1
 fi
-if [ -f .runner ] && [ "$replace" != 1 ]; then
+# Like the real config.sh (verified on 2.338.0): an existing .runner is
+# refused even with --replace, which only replaces a same-named runner on
+# GitHub.
+if [ -f .runner ]; then
   echo "Cannot configure the runner because it is already configured. To reconfigure the runner, run './config.sh remove' first."
   exit 1
 fi

@@ -6,11 +6,84 @@
 #                        (unset: the image always exists)
 #   FAKE_DOCKER_PULL_FAIL=1   `docker pull` fails
 #   FAKE_DOCKER_RUN_FAIL=1    `docker run` fails
+#   FAKE_DOCKER_PROBE_FAIL=1  the runner-image probe reports missing tools
+#   FAKE_DOCKER_RUNNER_EXIT=N a runner container fails to launch with exit N
+#
+# Runner containers (container-runner mode) are emulated: `docker run` with the
+# ownci-entrypoint marker runs the command after it in the -w directory with
+# the -e variables, and <dir>/container-<name> exists while it runs (`inspect`
+# and `rm` look at it).
 if [ -n "${FAKE_DOCKER_LOG:-}" ]; then
   printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 fi
 
+state="${FAKE_DOCKER_DIR:-}"
+
+image_present() {
+  [ -z "$state" ] || [ -f "$state/image-present" ]
+}
+
+run_runner_container() {
+  local workdir="" name="" image="" i
+  local -a envs=() cmd=()
+  local args=("$@")
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[i]}" in
+      -w) workdir="${args[i + 1]}"; i=$((i + 1)) ;;
+      -e) envs+=("${args[i + 1]}"); i=$((i + 1)) ;;
+      --name) name="${args[i + 1]}"; i=$((i + 1)) ;;
+      --entrypoint) image="${args[i + 2]}"; i=$((i + 2)) ;;
+      ownci-entrypoint) cmd=("${args[@]:i + 1}"); break ;;
+    esac
+  done
+  if ! image_present || [ -n "${FAKE_DOCKER_RUNNER_EXIT:-}" ]; then
+    echo "docker: Error response from daemon: No such image: $image" >&2
+    exit "${FAKE_DOCKER_RUNNER_EXIT:-125}"
+  fi
+  if [ -n "$state" ] && [ -f "$state/container-$name" ]; then
+    echo "docker: Error response from daemon: Conflict. The container name \"/$name\" is already in use." >&2
+    exit 125
+  fi
+  [ -z "$state" ] || echo "running $image" > "$state/container-$name"
+  # The supervisor signals the whole process group; let run.sh handle it.
+  trap ':' INT TERM
+  (cd "$workdir" && env "${envs[@]}" "${cmd[@]}")
+  local code=$?
+  [ -z "$state" ] || rm -f "$state/container-$name"
+  exit "$code"
+}
+
 case "${1:-}" in
+  stop)
+    # Like `docker stop` of a --rm container: it is gone afterwards.
+    name="${*: -1}"
+    if [ -n "$state" ] && [ -f "$state/container-$name" ]; then
+      rm -f "$state/container-$name"
+      echo "$name"
+      exit 0
+    fi
+    echo "Error response from daemon: No such container: $name" >&2
+    exit 1
+    ;;
+  rm)
+    name="${*: -1}"
+    if [ -n "$state" ] && [ -f "$state/container-$name" ]; then
+      rm -f "$state/container-$name"
+      echo "$name"
+      exit 0
+    fi
+    echo "Error response from daemon: No such container: $name" >&2
+    exit 1
+    ;;
+  inspect)
+    name="${*: -1}"
+    if [ -n "$state" ] && [ -f "$state/container-$name" ]; then
+      cat "$state/container-$name"
+      exit 0
+    fi
+    echo "Error: No such object: $name" >&2
+    exit 1
+    ;;
   version)
     echo '{"Client":{"Version":"27.0.3"},"Server":{"Version":"27.0.3","Os":"linux"}}'
     ;;
@@ -34,6 +107,19 @@ case "${1:-}" in
       exit 1
     fi
     shift
+    for a in "$@"; do
+      if [ "$a" = "ownci-entrypoint" ]; then
+        run_runner_container "$@"
+      fi
+      if [ "$a" = "ownci-probe" ]; then
+        if [ -n "${FAKE_DOCKER_PROBE_FAIL:-}" ]; then
+          echo "missing: libicu"
+          exit 3
+        fi
+        echo ok
+        exit 0
+      fi
+    done
     args=("$@")
     src=""
     for ((i = 0; i < ${#args[@]}; i++)); do

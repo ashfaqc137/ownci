@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -533,4 +534,102 @@ func TestRunKillsLeftoverRunnerProcesses(t *testing.T) {
 	}
 	run.sigs <- syscall.SIGTERM
 	run.wait(t)
+}
+
+// TestRunRecyclesAfterEachJob covers container-runner mode: the runner runs
+// with --once (through a custom Command), exits after its job, and is launched
+// again with BeforeLaunch and AfterExit around every launch, without counting
+// restarts.
+func TestRunRecyclesAfterEachJob(t *testing.T) {
+	r := newRig(t)
+	var launches, exits atomic.Int32
+	o := r.opts()
+	o.Command = []string{"bash", filepath.Join(r.dir, "run.sh"), "--once"}
+	o.RecycleAfterJob = true
+	o.BeforeLaunch = func(context.Context) error { launches.Add(1); return nil }
+	o.AfterExit = func(context.Context) { exits.Add(1) }
+	run := r.start(o)
+	r.waitPhase(PhaseListening)
+
+	for i, job := range []string{"one", "two"} {
+		if err := os.WriteFile(filepath.Join(r.dir, ".fake-job-request"), []byte(job), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r.waitFor(func(s *State) bool { return s.LastJob != nil && s.LastJob.Name == job }, "job "+job)
+		want := int32(i + 2)
+		r.waitFor(func(s *State) bool { return launches.Load() == want && s.Phase == PhaseListening }, "a fresh runner after job "+job)
+	}
+	run.sigs <- syscall.SIGTERM
+	res := run.wait(t)
+	if res.err != nil || res.st.Phase != PhaseStopped || res.st.Restarts != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	if launches.Load() != 3 || exits.Load() != 3 {
+		t.Errorf("launches = %d, exits = %d, want 3 and 3", launches.Load(), exits.Load())
+	}
+	b, _ := os.ReadFile(r.paths.RunnerLog(testName))
+	if n := strings.Count(string(b), "[ownci] job finished; starting a fresh runner"); n != 2 {
+		t.Errorf("%d recycle notices in the log:\n%s", n, b)
+	}
+}
+
+// Without RecycleAfterJob an exit after a job is a crash like any other.
+func TestRunExitAfterJobWithoutRecycleIsACrash(t *testing.T) {
+	r := newRig(t)
+	o := r.opts()
+	o.Command = []string{"bash", filepath.Join(r.dir, "run.sh"), "--once"}
+	run := r.start(o)
+	r.waitPhase(PhaseListening)
+	if err := os.WriteFile(filepath.Join(r.dir, ".fake-job-request"), []byte("one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.waitFor(func(s *State) bool { return s.Restarts == 1 }, "a counted restart")
+	run.sigs <- syscall.SIGTERM
+	run.wait(t)
+}
+
+func TestRunLaunchFailureIsNotRetried(t *testing.T) {
+	r := newRig(t)
+	script := filepath.Join(r.t.TempDir(), "docker")
+	if err := os.WriteFile(script, []byte("#!/usr/bin/env bash\necho 'docker: Error response from daemon: No such image: img' >&2\nexit 125\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var exits atomic.Int32
+	o := r.opts()
+	o.Command = []string{script, "run", "img"}
+	o.LaunchFailed = func(code int) bool { return code == 125 }
+	o.AfterExit = func(context.Context) { exits.Add(1) }
+	res := r.start(o).wait(t)
+	if res.err != nil || res.st.Phase != PhaseCrashed || res.st.Restarts != 0 || res.st.ExitCode == nil || *res.st.ExitCode != 125 {
+		t.Fatalf("result = %+v", res)
+	}
+	if !strings.Contains(res.st.LastError, "could not be launched (exit code 125)") || !strings.Contains(res.st.LastError, "No such image") {
+		t.Errorf("LastError = %q", res.st.LastError)
+	}
+	if exits.Load() != 1 {
+		t.Errorf("AfterExit ran %d times", exits.Load())
+	}
+}
+
+// A supervisor that cannot react (here: stopped) is SIGKILLed, and AfterKill
+// cleans up what it would have (container mode: the runner container).
+func TestStopForceRunsAfterKill(t *testing.T) {
+	r := newRig(t)
+	cmd := r.spawnSupervisor("1h")
+	r.waitPhase(PhaseListening)
+	if err := cmd.Process.Signal(syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	afterKill := 0
+	err := Stop(context.Background(), r.paths, testName, StopOptions{Timeout: 300 * time.Millisecond, Force: true, IsOwnci: anyProcess,
+		AfterKill: func(context.Context) { afterKill++ }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterKill != 1 {
+		t.Errorf("AfterKill ran %d times", afterKill)
+	}
+	if running, _, _ := IsRunning(r.paths, testName); running {
+		t.Error("still running after force")
+	}
 }

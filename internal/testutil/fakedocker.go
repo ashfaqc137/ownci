@@ -64,3 +64,31 @@ func (f FakeDocker) Calls() []string {
 	}
 	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 }
+
+// SetContainer makes the container name exist (`inspect` prints content, e.g.
+// "running <image>") or, with content "", not exist.
+func (f FakeDocker) SetContainer(name, content string) {
+	path := filepath.Join(f.Dir, "container-"+name)
+	if content == "" {
+		_ = os.Remove(path)
+		return
+	}
+	_ = os.WriteFile(path, []byte(content+"\n"), 0o644)
+}
+
+// ContainerExists reports whether the fake container name exists.
+func (f FakeDocker) ContainerExists(name string) bool {
+	_, err := os.Stat(filepath.Join(f.Dir, "container-"+name))
+	return err == nil
+}
+
+// CallsMatching returns the recorded invocations that start with prefix.
+func (f FakeDocker) CallsMatching(prefix string) []string {
+	var out []string
+	for _, c := range f.Calls() {
+		if strings.HasPrefix(c, prefix) {
+			out = append(out, c)
+		}
+	}
+	return out
+}

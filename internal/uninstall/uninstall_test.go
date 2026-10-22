@@ -647,3 +647,56 @@ func TestPurgeNeverFollowsSymlinks(t *testing.T) {
 		t.Error("purge followed a symlink out of the data dir")
 	}
 }
+
+func setMode(t *testing.T, e *env, mode string) {
+	t.Helper()
+	cfg, err := config.Load(e.paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Runner.Mode, cfg.Runner.Image = mode, ""
+	if mode == config.ModeContainerRunner {
+		cfg.Runner.Image = "img"
+	}
+	if err := config.Save(e.paths, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUninstallRemovesTheRunnerContainer(t *testing.T) {
+	e := newEnv(t)
+	setMode(t, e, config.ModeContainerRunner)
+	f := execx.NewFake()
+	f.SetPath("docker", "/usr/bin/docker")
+	f.On("docker", "inspect").Stdout("running img\n")
+	f.On("docker", "stop").Stdout("ownci-" + rname + "\n")
+	f.On("docker", "rm").Stdout("ownci-" + rname + "\n")
+	e.other = f
+	if err := e.run(Options{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	var rm string
+	for _, c := range f.Calls() {
+		if c.Name == "docker" && c.Args[0] == "rm" {
+			rm = strings.Join(c.Args, " ")
+		}
+	}
+	if rm != "rm --force ownci-"+rname || !strings.Contains(e.out.String(), "✓ Removed the runner container ownci-"+rname) {
+		t.Errorf("rm call %q, output:\n%s", rm, e.out.String())
+	}
+}
+
+func TestUninstallHostModeLeavesDockerAlone(t *testing.T) {
+	e := newEnv(t)
+	f := execx.NewFake()
+	f.SetPath("docker", "/usr/bin/docker")
+	e.other = f
+	if err := e.run(Options{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.Calls() {
+		if c.Name == "docker" {
+			t.Errorf("host-mode uninstall called docker: %v", c.Args)
+		}
+	}
+}

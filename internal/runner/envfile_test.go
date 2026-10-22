@@ -138,3 +138,58 @@ func TestReadEnv(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func TestEnsureEnvRemovesAbsentKeys(t *testing.T) {
+	dir := t.TempDir()
+	orig := "LANG=C.UTF-8\nGONE=1\n" + EnvMarker + "\nKEEP=old\nGONE=2\n"
+	if err := os.WriteFile(EnvPath(dir), []byte(orig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := EnsureEnv(dir, map[string]string{"KEEP": "new"}, "GONE")
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	got, _ := os.ReadFile(EnvPath(dir))
+	if want := "LANG=C.UTF-8\n" + EnvMarker + "\nKEEP=new\n"; string(got) != want {
+		t.Errorf(".env =\n%s\nwant\n%s", got, want)
+	}
+	if changed, err := EnsureEnv(dir, map[string]string{"KEEP": "new"}, "GONE"); err != nil || changed {
+		t.Errorf("second run: changed=%v err=%v", changed, err)
+	}
+	for _, bad := range []string{"", "A=B", "KEEP"} {
+		if _, err := EnsureEnv(dir, map[string]string{"KEEP": "new"}, bad); err == nil {
+			t.Errorf("absent key %q accepted", bad)
+		}
+	}
+}
+
+func TestSetAsideRegistration(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{".runner", ".credentials"} { // no .credentials_rsaparams: missing files are fine
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(n), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restore, discard, err := SetAsideRegistration(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Registered(dir) {
+		t.Fatal(".runner still in place")
+	}
+	if err := restore(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, ".credentials")); string(b) != ".credentials" || !Registered(dir) {
+		t.Fatal("not restored")
+	}
+
+	_, discard, err = SetAsideRegistration(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	discard()
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("left behind: %v", entries)
+	}
+}

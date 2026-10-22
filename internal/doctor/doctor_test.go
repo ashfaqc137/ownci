@@ -142,3 +142,40 @@ func TestGitCheck(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+func TestRunnerContainerCheck(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	run := func(f *execx.Fake, dir string) Result { return RunnerContainerCheck(f, dir, "img").Run(ctx) }
+
+	f := execx.NewFake()
+	f.On("docker", "image", "inspect").Stdout("sha256:x")
+	f.On("docker", "run").Stdout("ok")
+	if r := run(f, dir); r.Level != Pass {
+		t.Errorf("healthy: %+v", r)
+	}
+
+	f = execx.NewFake()
+	f.On("docker", "image", "inspect").Exit(1)
+	if r := run(f, dir); r.Level != Warn || !strings.Contains(r.Hint, "docker pull img") {
+		t.Errorf("image missing: %+v", r)
+	}
+
+	f = execx.NewFake()
+	f.On("docker", "image", "inspect").Stdout("sha256:x")
+	f.On("docker", "run").Exit(3).Stdout("missing: setpriv")
+	if r := run(f, dir); r.Level != Fail || !strings.Contains(r.Detail, "lacks: setpriv") || r.Hint == "" {
+		t.Errorf("probe failure: %+v", r)
+	}
+
+	f = execx.NewFake()
+	f.On("docker", "image", "inspect").Stdout("sha256:x")
+	f.On("docker", "run").Stdout("optional: git\nok")
+	if r := run(f, dir); r.Level != Warn || !strings.Contains(r.Detail, "git is missing") {
+		t.Errorf("recommended tool missing: %+v", r)
+	}
+
+	if r := run(execx.NewFake(), "/mnt/c/ownci/runners/x"); r.Level != Fail || !strings.Contains(r.Detail, "Windows drive") {
+		t.Errorf("windows path: %+v", r)
+	}
+}
