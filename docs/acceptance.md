@@ -3,78 +3,92 @@
 > A working copy of PRD §12 (`plan.md` is not edited). Tick an item **only** with evidence from running
 > [`e2e.md`](e2e.md) against real GitHub: a run URL, a log excerpt or a screenshot path, with the date.
 >
-> **Status: NOT YET EXECUTED.** Everything below is unchecked: the offline parts (unit/integration tests with
-> fakes, the fake-GitHub flow, a real Docker cleanup check) are covered by `make check` and the task notes in
-> `tasks/`, but none of the real-GitHub items has been verified yet.
+> **Status: EXECUTED 2026-10-22 for v0.1.0 — all items pass on WSL2 + Docker Desktop (amd64).**
+> Run by the implementing LLM with the **release binary** (`make release VERSION=v0.1.0`, the amd64
+> archive) on private `ashfaqc137/blog`, throwaway PR #6 (closed, branch deleted). The workflows were the
+> `e2e/workflows/` files with `pull_request` triggers and an extra label, so the sandbox's default branch
+> was not touched. Native Linux (Docker Engine) and arm64 are **not** covered by this record.
 
 | Field | Value |
 |---|---|
-| Date | _(fill in)_ |
-| Machine / WSL distro / kernel | |
-| Docker version | |
-| OwnCI version (commit) | |
-| Runner version (pinned → actual) | |
-| Sandbox repository | |
+| Date | 2026-10-22 |
+| Machine / WSL distro / kernel | WSL2 openSUSE-Tumbleweed, 6.18.54.1-microsoft-standard-WSL2, amd64 |
+| Docker version | Docker Desktop, server 29.5.3 |
+| OwnCI version (commit) | `ownci v0.1.0 (commit a6a2c02)`, release archive (0 `OWNCI_DEV` strings) |
+| Runner version (pinned → actual) | 2.338.0 → 2.338.0 (no self-update offered) |
+| Sandbox repository | `ashfaqc137/blog` (private), PR #6; step 4 against public `ashfaqc137/ownci` |
 
 ## Checklist (from PRD §12)
 
 ### CLI and installation
 
-- [ ] `ownci setup` provisions the official runner.
-- [ ] The runner archive is verified before extraction.
-- [ ] Runner files and OwnCI configuration are stored locally.
-- [ ] GitHub registration succeeds with appropriate credentials.
-- [ ] Configuration persists across restarts.
-- [ ] `ownci start` starts the runner.
-- [ ] `ownci stop` stops the runner gracefully.
-- [ ] `ownci status` reports meaningful state.
-- [ ] `ownci uninstall` supports safe cleanup.
+- [x] `ownci setup` provisions the official runner. — step 3
+- [x] The runner archive is verified before extraction. — step 3 ("downloaded, verified and extracted")
+- [x] Runner files and OwnCI configuration are stored locally. — step 3 (`drwx------` data/config, `-rw-------` config.json)
+- [x] GitHub registration succeeds with appropriate credentials. — step 3 (runner id 26, labels `ownci,v010e2e`)
+- [x] Configuration persists across restarts. — step 9 (same runner id 26, re-run check green)
+- [x] `ownci start` starts the runner. — step 5
+- [x] `ownci stop` stops the runner gracefully. — step 9
+- [x] `ownci status` reports meaningful state. — steps 5, 6, 9, 10
+- [x] `ownci uninstall` supports safe cleanup. — step 12 (both instances)
 
 ### End-to-end CI
 
-- [ ] A real GitHub Actions workflow targets the local runner.
-- [ ] A pull request displays the expected check result in GitHub.
-- [ ] Job compute runs on the developer's local machine.
-- [ ] The selected Docker execution mode is validated.
-- [ ] The actual execution boundary is verified rather than assumed.
-- [ ] Cleanup and repeated job execution are tested.
+- [x] A real GitHub Actions workflow targets the local runner. — step 6
+- [x] A pull request displays the expected check result in GitHub. — step 6, PR #6
+- [x] Job compute runs on the developer's local machine. — step 6 (`runner=ownci-v010-e2e`)
+- [x] The selected Docker execution mode is validated. — steps 6–7 (host), C2 (container-runner)
+- [x] The actual execution boundary is verified rather than assumed. — step 7 (no-container job rejected)
+- [x] Cleanup and repeated job execution are tested. — step 8, C2
 
 ### WSL distribution
 
-- [ ] The Linux OwnCI binary runs in the supported WSL2 configuration.
-- [ ] Docker connectivity is documented and validated.
-- [ ] Runner setup and lifecycle work from WSL.
-- [ ] The end-to-end PR check passes.
-- [ ] Installation and troubleshooting instructions are available.
+- [x] The Linux OwnCI binary runs in the supported WSL2 configuration. — steps 1–12
+- [x] Docker connectivity is documented and validated. — step 2 (`doctor`), README Prerequisites
+- [x] Runner setup and lifecycle work from WSL. — steps 3, 5, 9, 10, 12
+- [x] The end-to-end PR check passes. — step 6
+- [x] Installation and troubleshooting instructions are available. — README Install / Troubleshooting
 
 ### Security and documentation
 
-- [ ] Secrets are not written to ordinary logs.
-- [ ] The trust model and isolation limitations are documented.
-- [ ] Runner and CLI versions can be inspected.
-- [ ] Unsupported configurations fail clearly.
+- [x] Secrets are not written to ordinary logs. — step 11
+- [x] The trust model and isolation limitations are documented. — README "Security and trust model"
+- [x] Runner and CLI versions can be inspected. — steps 1, 3 (`version`, `status`)
+- [x] Unsupported configurations fail clearly. — step 4, and the refusals below
 
 ## Evidence
 
 | Item | Evidence (URL / excerpt / path) | Date |
 |---|---|---|
-| PR check (step 6) | | |
-| No-container rejection (step 7) | | |
-| Poison test (step 8) | | |
-| Stop / restart without re-registration (step 9) | | |
-| Kill test (step 10) | | |
-| No tokens in logs (step 11) | | |
-| Uninstall (step 12) | | |
+| Doctor (step 2) | 7 passed, 0 warnings: platform, wsl, user, data-dir, runner-deps (ICU), docker 29.5.3, git | 2026-10-22 |
+| Setup (step 3) | `Repository ashfaqc137/blog (private)`, `Runner 2.338.0 downloaded, verified and extracted`, `registered on GitHub (id 26)`; `.env` has `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true`, the hook and the pinned busybox image | 2026-10-22 |
+| Public repo refused (step 4) | `Error: ashfaqc137/ownci is a public repository: pull requests from forks could run arbitrary code …`, hint `--allow-public-repo`, exit 1; empty `runners/`, 0 runners registered on `ashfaqc137/ownci` | 2026-10-22 |
+| Start / status (step 5) | `listening`, `Isolation container jobs required ✓ cleanup hook ✓ cleanup image ✓`, `GitHub online, idle` | 2026-10-22 |
+| PR check (step 6) | https://github.com/ashfaqc137/blog/actions/runs/39801588619 ✓: `PRETTY_NAME="Ubuntu 24.04.5 LTS"`, `runner=ownci-v010-e2e`; status `Last job pass → Succeeded`, `last cleanup: ok` | 2026-10-22 |
+| No-container rejection (step 7) | https://github.com/ashfaqc137/blog/actions/runs/39801588494 ✗ (expected): `##[error]Jobs without a job container are forbidden on this runner, please add a 'container:' to your job …` in *Set up job* | 2026-10-22 |
+| Poison test (step 8) | https://github.com/ashfaqc137/blog/actions/runs/39801588512 ✓: `ok, absent:` `/__w/_tool/poison`, `/__w/blog/blog/../poison`, `/__w/_actions/poison`; `last-cleanup.json` `{"result":"ok"}`; `_work` = `_PipelineMapping`, `_temp` | 2026-10-22 |
+| Stop / restart without re-registration (step 9) | stop → `Process not running`, `State stopped`; start → listening; runner id 26 before and after; re-run of https://github.com/ashfaqc137/blog/actions/runs/39801588619 (attempt 2) ✓ | 2026-10-22 |
+| Kill test (step 10) | `kill -9` of the supervisor → `Process stopped (unexpectedly; last state: listening …)`; `start --detach` recovered (`GitHub online, idle`) after ~70 s (see Findings) | 2026-10-22 |
+| No tokens in logs (step 11) | `grep -rEI 'gh[pousr]_…\|github_pat_'` over the data dir → `no tokens found` | 2026-10-22 |
+| Uninstall (step 12) | `Runner unregistered`, `Local files removed (… is gone)` for both instances; 0 runners on `blog`, no `ownci-*` container | 2026-10-22 |
+| Container-runner mode alongside host mode (C1/C2) | second data dir, runner `ownci-v010-ctr` (id 27, label `v010ctr`), container labelled `ownci.datadir=<its data dir>`; both instances online and busy at the same time. https://github.com/ashfaqc137/blog/actions/runs/39803074928 ✓ (job without `container:`: `Ubuntu 24.04.5 LTS`, `uid=1000(ubuntu)`, `docker server 29.5.3`, `ok, absent:` `/opt`, `$HOME`, `/tmp` markers → fresh container per job); `ctr-pass` job ✓ on `ownci-v010-ctr`; host instance in parallel: https://github.com/ashfaqc137/blog/actions/runs/39803074913 ✓, https://github.com/ashfaqc137/blog/actions/runs/39803074845 ✗ (expected), https://github.com/ashfaqc137/blog/actions/runs/39803074790 ✓; `restarts 0` on both | 2026-10-22 |
 
 ## Findings
 
-_(copy the Findings table from `e2e.md`)_
+| Step | Expected | Actual | Impact / follow-up |
+|---|---|---|---|
+| 8 | The hook runs after the job container stops (D10 risk) | Container removed 15:06:03.6Z (*Stop containers*), `ownci: workspace cleaned` 15:06:04.3Z (*Complete runner*) | None; same as 2026-10-15 |
+| 8 | Wiping `_work` does not break the runner | `second` started fine after the wipe; later runs green | None |
+| 5/9 | The runner version is the pinned one | 2.338.0 pinned = actual | Self-update not exercised (no newer release) |
+| 10 | The runner process after `kill -9` of the supervisor | One runner process survived the kill; after `start` there was again exactly one (the new one). The old listener's GitHub session stayed open: the new listener logged `A session for this runner already exists … Conflict. Retrying until reconnected.` and was online ~70 s later without intervention | Documented as a known limitation; `status` keeps showing that line as *Last error* after recovery |
+| C2 | Run status follows its jobs | `ctr-pass`: the only job completed `success` at 15:16:05Z, the run still showed `in_progress` on GitHub afterwards | GitHub-side roll-up delay; not an OwnCI issue |
+| — | Several repositories side by side | Two data dirs, host + container-runner, ran jobs concurrently; same-name collision refusals verified with real Docker and the fake GitHub (commit `1a059c0`) | Second instance used the same sandbox repo under another name, not a second repository |
 
 ## t11: container-runner mode (executed 2026-10-22)
 
 Run by the implementing LLM on private `ashfaqc137/blog`, throwaway PR #4 (closed, branch deleted).
 The workflows were the `e2e/workflows/` files with `pull_request` triggers and `runs-on: [ownci, t11e2e]`.
-The MVP checklist above is still the user's to tick.
+The MVP checklist above was ticked by the v0.1.0 run.
 
 | Field | Value |
 |---|---|
