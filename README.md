@@ -12,9 +12,11 @@ that **every job runs inside a Docker container**: either the job declares
 container that jobs without `container:` use as their image
 ([container-runner mode](#run-every-job-in-a-container-no-container-needed)).
 
-> **Status: MVP. Linux and WSL2 only** (amd64 and arm64). Native Windows and
-> macOS are not supported. The first real-GitHub validation is described in
-> [`docs/e2e.md`](docs/e2e.md); results go in [`docs/acceptance.md`](docs/acceptance.md).
+> **Status: MVP. Linux and WSL2 only.** Tested end to end on **WSL2 with Docker Desktop,
+> amd64**. Native Linux (Docker Engine) and arm64 builds are shipped and expected to work,
+> but are not tested yet. Native Windows and macOS are not supported. The real-GitHub
+> validation is described in [`docs/e2e.md`](docs/e2e.md); results are in
+> [`docs/acceptance.md`](docs/acceptance.md).
 
 ## How it works
 
@@ -39,7 +41,8 @@ container that jobs without `container:` use as their image
 
 ## Prerequisites
 
-- **Linux or WSL2** on amd64 or arm64, and a **non-root** user (the runner refuses root).
+- **Linux or WSL2** on amd64 or arm64 (tested: WSL2 on amd64), and a **non-root** user
+  (the runner refuses root).
 - **Docker** with a Linux daemon, reachable by your user:
   - *WSL2 with Docker Desktop:* Docker Desktop → Settings → Resources → **WSL integration** →
     enable your distro → Apply & restart. Without it, `docker` in WSL is a stub that fails.
