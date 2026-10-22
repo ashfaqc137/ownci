@@ -1,0 +1,152 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+import Code from '../components/Code.astro'
+
+const hostMode = `
+jobs:
+  build:
+    runs-on: [ownci]
+    container: ubuntu:24.04     # required in host mode
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+`
+
+const containerRunner = `
+jobs:
+  build:
+    runs-on: [ownci]            # no container: needed
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y jq && make test
+`
+
+const team = `
+jobs:
+  build:
+    runs-on: [ownci, "\${{ github.actor }}"]   # the runner of whoever pushed
+    container: node:22
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+`
+---
+
+<BaseLayout
+  title="How OwnCI works"
+  description="GitHub keeps the workflows, the queue and the PR check. OwnCI runs the official GitHub Actions runner on your machine, puts every job in a container and wipes the workspace afterwards."
+>
+  <main id="main" class="content-page">
+    <section class="page-hero">
+      <p class="eyebrow"><span class="eyebrow-dot"></span> How it works</p>
+      <h1>GitHub runs the show.<br /><span>Your machine runs the job.</span></h1>
+      <p class="lead">
+        OwnCI doesn’t implement a CI protocol. It downloads, registers, supervises and cleans up
+        the official GitHub Actions runner, and configures it so every job runs inside a Docker
+        container.
+      </p>
+    </section>
+
+    <section aria-labelledby="owns-title">
+      <div class="section-heading">
+        <p class="section-kicker">Who owns what</p>
+        <h2 id="owns-title">A clear split of responsibilities.</h2>
+      </div>
+      <div class="compare">
+        <div class="compare-col">
+          <h3>GitHub keeps</h3>
+          <ul>
+            <li>Your workflow files and when they trigger</li>
+            <li>Queuing and scheduling jobs</li>
+            <li>The check on the pull request</li>
+            <li>Job logs in the Actions tab</li>
+          </ul>
+        </div>
+        <div class="compare-col ours">
+          <h3>OwnCI takes care of</h3>
+          <ul>
+            <li>Downloading the pinned runner and verifying its checksum</li>
+            <li>Registering it with an opt-in <code>ownci</code> label</li>
+            <li>Supervising the process: start, stop, restart with backoff</li>
+            <li>Enforcing container jobs and wiping the workspace after each</li>
+            <li>Reporting what is actually true with <code>status</code> and <code>doctor</code></li>
+            <li>Unregistering and removing everything with <code>uninstall</code></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="job-title">
+      <div class="section-heading">
+        <p class="section-kicker">One job, start to finish</p>
+        <h2 id="job-title">From push to green check.</h2>
+      </div>
+      <div class="flow">
+        <div class="flow-step"><span>01</span><strong>You push</strong><p>A pull request triggers a workflow whose job says <code>runs-on: [ownci]</code>.</p></div>
+        <div class="flow-connector" aria-hidden="true">→</div>
+        <div class="flow-step"><span>02</span><strong>GitHub queues it</strong><p>The job waits for an online runner with the <code>ownci</code> label.</p></div>
+        <div class="flow-connector" aria-hidden="true">→</div>
+        <div class="flow-step owned"><span>03</span><strong>Your runner takes it</strong><p>The official runner, supervised by OwnCI, runs the job inside a container on your Docker.</p></div>
+        <div class="flow-connector" aria-hidden="true">→</div>
+        <div class="flow-step owned"><span>04</span><strong>Wiped for the next</strong><p>A hook wipes the workspace in a throwaway, network-less container. If that fails, the job fails visibly.</p></div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="modes-title">
+      <div class="section-heading">
+        <p class="section-kicker">Two ways to run</p>
+        <h2 id="modes-title">Pick the mode that fits your workflows.</h2>
+        <p>Both keep every job in a container. They differ in where the runner itself lives.</p>
+      </div>
+      <div class="card-grid two">
+        <article class="card">
+          <span class="card-number">HOST MODE · DEFAULT</span>
+          <h3>Jobs declare their container</h3>
+          <p>
+            The runner runs on your machine, and every job must say <code>container:</code>. A job
+            without one is rejected by the runner, so nothing runs directly on your host.
+          </p>
+          <Code label="workflow.yml" code={hostMode} />
+        </article>
+        <article class="card accent">
+          <span class="card-number">CONTAINER-RUNNER MODE</span>
+          <h3>Workflows run unchanged</h3>
+          <p>
+            The runner itself runs in a container, a fresh one for every job. Jobs without <code>container:</code> run inside it as your user, with <code>sudo</code>; jobs with
+            one behave as in host mode.
+          </p>
+          <Code label="workflow.yml" code={containerRunner} />
+        </article>
+      </div>
+      <p class="callout">
+        Switch with <code>ownci setup --repo owner/name --mode container-runner</code>. The default
+        image is the official <code>ghcr.io/actions/actions-runner</code>, pinned by digest. <a href="/docs/workflows/">Details in the docs →</a>
+      </p>
+    </section>
+
+    <section class="split-section" aria-labelledby="team-title">
+      <div class="section-heading">
+        <p class="section-kicker">For teams</p>
+        <h2 id="team-title">One workflow, everyone’s own machine.</h2>
+      </div>
+      <div class="prose">
+        <p>
+          Give each developer’s runner their GitHub username as an extra label, and let the
+          workflow pick the runner of whoever triggered it. Your pushes run on your machine, your
+          teammate’s on theirs.
+        </p>
+        <Code label="workflow.yml" code={team} />
+        <p>
+          If someone’s runner is offline, their job waits in the queue. It never lands on someone
+          else’s machine.
+        </p>
+      </div>
+    </section>
+
+    <section class="cta-band">
+      <span class="cta-spark" aria-hidden="true">◉</span>
+      <div><p class="section-kicker">Next</p><h2>Know exactly what a container does and doesn’t protect.</h2><p>Read the trust model before you set up your first runner.</p></div>
+      <a class="button-primary" href="/security/">Security <span aria-hidden="true">→</span></a>
+    </section>
+  </main>
+</BaseLayout>

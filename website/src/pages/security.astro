@@ -1,0 +1,91 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+
+const enforced = [
+  ['Container jobs only.', 'In host mode the runner is configured to reject any job without a container: line. If OwnCI can’t establish this, it refuses to start the runner.'],
+  ['The runner stays in its container.', 'In container-runner mode the runner is only ever started inside its container, which is replaced after every job. The cleanup hook is mounted read-only, so a job can’t switch the wipe off.'],
+  ['A clean workspace for every job.', 'After each job, _work (workspace, actions, tools) is wiped from a throwaway, network-less container using a digest-pinned image. If the cleanup fails, the job fails visibly.'],
+  ['Opt-in label.', 'The runner carries only the ownci label, so a stray runs-on: self-hosted never lands on your laptop.'],
+  ['No privileged containers.', 'None of the containers OwnCI uses are privileged.'],
+  ['Tokens handled carefully.', 'Your GitHub token is never stored and the registration token is single-use. Runner credentials live in directories with mode 0700 and files with mode 0600, and tokens are redacted from the logs OwnCI writes and captures.'],
+  ['Checked every time.', 'All of this is re-asserted on every start and reported by status and doctor.'],
+]
+
+const limits = [
+  ['The Docker socket is mounted into job containers.', 'The official runner does this, and jobs run as root. A job can therefore control your Docker daemon, which is effectively root on your machine. The container is a barrier against accidents, not against a malicious workflow.'],
+  ['Network.', 'Job containers use Docker’s default network and can reach the internet and your LAN. OwnCI sets no network policy.'],
+  ['Sibling containers.', 'services:, uses: docker://… and Dockerfile actions run as siblings on your Docker daemon, outside the job container and outside OwnCI’s control.'],
+  ['Shared Docker daemon.', 'Jobs share the daemon, images and build cache with everything else on the machine. Images persist between jobs; only _work is wiped.'],
+  ['Root in the container.', 'Containers run as root by default and can read and write the runner’s work directories while a job runs.'],
+  ['The runner runs on your host as you.', 'OwnCI only allows container jobs, but a vulnerability in the runner, Docker or an image is a vulnerability on your machine.'],
+  ['No resource limits.', 'No CPU, memory or disk limits are applied to jobs.'],
+  ['Container-runner credentials.', 'In container-runner mode a job without container: runs next to the runner’s registration credentials and can read or change them while it runs.'],
+]
+---
+
+<BaseLayout
+  title="Security and trust model · OwnCI"
+  description="What OwnCI enforces on your machine, and what a Docker container does not protect you from. OwnCI is built for private repositories whose workflows you trust."
+>
+  <main id="main" class="content-page">
+    <section class="page-hero">
+      <p class="eyebrow"><span class="eyebrow-dot"></span> Security and trust model</p>
+      <h1>Built for code you trust.<br /><span>Honest about the rest.</span></h1>
+      <p class="lead">
+        OwnCI runs code from your workflows on your machine. Here is exactly what it enforces, and
+        what a container does not protect you from. Read this before pointing it at anything you
+        don’t control.
+      </p>
+    </section>
+
+    <section class="split-section" aria-labelledby="supported-title">
+      <div class="section-heading">
+        <p class="section-kicker">Supported</p>
+        <h2 id="supported-title">Private repositories, trusted workflows.</h2>
+      </div>
+      <div class="prose">
+        <p>
+          OwnCI is meant for <em>private</em> repositories whose workflows you trust: your own, your
+          team’s. <code>ownci setup</code> <strong>refuses public repositories</strong> unless you
+          pass <code>--allow-public-repo</code>, because pull requests from forks can run arbitrary
+          code on a self-hosted runner.
+        </p>
+        <p>
+          If you accept that risk anyway, set the repository’s <em>Fork pull request workflows from
+          outside collaborators</em> to <em>Require approval for all outside collaborators</em>.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="enforced-title">
+      <div class="section-heading">
+        <p class="section-kicker">What OwnCI enforces</p>
+        <h2 id="enforced-title">Guard rails that are checked, not assumed.</h2>
+      </div>
+      <ul class="honest-list">
+        {enforced.map(([title, body]) => (
+          <li><span class="mark yes" aria-hidden="true">✓</span><span><strong>{title}</strong> {body}</span></li>
+        ))}
+      </ul>
+    </section>
+
+    <section class="section" aria-labelledby="limits-title">
+      <div class="section-heading">
+        <p class="section-kicker">What a container does not protect against</p>
+        <h2 id="limits-title">A container is not a sandbox for hostile code.</h2>
+      </div>
+      <ul class="honest-list">
+        {limits.map(([title, body]) => (
+          <li><span class="mark no" aria-hidden="true">!</span><span><strong>{title}</strong> {body}</span></li>
+        ))}
+      </ul>
+      <p class="callout warn"><strong>OwnCI does not claim to safely run arbitrary untrusted pull request code.</strong></p>
+    </section>
+
+    <section class="cta-band">
+      <span class="cta-spark" aria-hidden="true">◉</span>
+      <div><p class="section-kicker">Comfortable with the model?</p><h2>Set up your first runner.</h2><p>Start with <code>ownci doctor</code>; it checks isolation too.</p></div>
+      <a class="button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
+    </section>
+  </main>
+</BaseLayout>

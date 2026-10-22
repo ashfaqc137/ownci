@@ -1,0 +1,38 @@
+---
+import DocsShell from '../../components/DocsShell.astro'
+
+const commands = [
+  ['ownci version [--json]', 'OwnCI version, commit, date, and the runner version when set up.'],
+  ['ownci doctor [--json]', 'Read-only health checks: platform, user, data dir, ICU, Docker, isolation. Exits with code 3 if one fails.'],
+  ['ownci setup --repo owner/name', 'Download and verify the pinned runner, register it with the label ownci only, and install the isolation settings and cleanup hook. Flags: --name, --labels a,b, --mode host|container-runner, --image (container-runner mode), --force (re-register in place, also to switch modes; refused while the runner runs), --allow-public-repo, --dry-run, --download-only.'],
+  ['ownci start [--detach]', 'Re-assert isolation, clean up leftovers and start the runner under supervision (restarts on crashes with backoff; in container-runner mode a fresh container per job). --wait sets how long --detach waits for “listening”; --image overrides the runner image for this session.'],
+  ['ownci stop [--force]', 'Gracefully stop the runner; a running job is cancelled. Registration and files are kept. --timeout defaults to 45 s.'],
+  ['ownci status [--remote] [--json]', 'What is actually true: installed, registered, mode, process, runner state, last job, isolation, Docker, last error. --remote also asks GitHub.'],
+  ['ownci logs [--source runner|ownci|supervisor|diag] [-n N] [-f]', 'Tail OwnCI’s and the runner’s logs, with secrets redacted.'],
+  ['ownci uninstall [--unregister] [--purge] [--local-only] [--yes] [--name n]', 'Stop the runner and, optionally, remove the GitHub registration and OwnCI’s files. Without flags it only stops and explains what is left.'],
+]
+---
+
+<DocsShell
+  title="Commands"
+  description="Every OwnCI command and its flags. Global flags: --data-dir and -v/--verbose."
+>
+  <section class="docs-section" id="commands">
+    <h2>Reference</h2>
+    <div class="table-wrap">
+      <table class="docs-table">
+        <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
+        <tbody>
+          {commands.map(([cmd, what]) => (
+            <tr><td><code>{cmd}</code></td><td>{what}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <h3>Global flags</h3>
+    <ul>
+      <li><code>--data-dir</code>: where OwnCI keeps its runner and state (default <code>~/.local/share/ownci</code>, or <code>$OWNCI_DATA_DIR</code>).</li>
+      <li><code>-v</code>, <code>--verbose</code>: more detail in OwnCI’s output.</li>
+    </ul>
+  </section>
+</DocsShell>

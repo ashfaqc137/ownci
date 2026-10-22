@@ -1,0 +1,200 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+import Code from '../components/Code.astro'
+
+const workflow = `
+jobs:
+  build:
+    runs-on: [ownci]            # the opt-in label OwnCI registers
+    container: ubuntu:24.04     # every job runs in a container
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+`
+---
+
+<BaseLayout
+  title="OwnCI · Your PR. Your Compute."
+  description="OwnCI turns the Linux machine you already code on into the GitHub Actions runner for your repository: set up, start, stop and remove it with one command each, with every job in a Docker container."
+>
+  <main id="main" class="content-page">
+    <section class="hero">
+      <p class="eyebrow"><span class="eyebrow-dot"></span> Open source · MVP for Linux &amp; WSL2</p>
+      <h1>Your PR.<br /><span>Your Compute.</span></h1>
+      <p class="lead">
+        OwnCI turns the machine you already code on into the GitHub Actions runner for your
+        repository. GitHub still queues the jobs and shows the check on your pull request. Your
+        machine does the work, and every job runs inside a Docker container.
+      </p>
+      <div class="hero-actions">
+        <a class="button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
+        <a class="button-secondary" href="/how-it-works/">See how it works</a>
+      </div>
+
+      <div class="run-demo" role="img" aria-label="Illustration: a pull request check is queued on GitHub, runs on your machine in a container, and passes; the workspace is then wiped.">
+        <div class="pr-card" aria-hidden="true">
+          <div class="pr-head">
+            <span class="pr-kicker">ACME/APP · PULL REQUEST</span>
+            <h2>Retry failed uploads <span>#42</span></h2>
+          </div>
+          <div class="pr-body">
+            <span class="pr-label">CHECKS</span>
+            <div class="check-row">
+              <div class="check-name">
+                <strong>CI / build</strong>
+                <small>runs-on: [ownci] · container: node:22</small>
+              </div>
+              <div class="check-states">
+                <span class="check-state state-queued">● Queued</span>
+                <span class="check-state state-running"><i></i> In progress</span>
+                <span class="check-state state-passed">✓ Passed</span>
+              </div>
+            </div>
+            <p class="pr-meta">Runner <code>ownci-mybox</code>: your laptop, not a hosted VM.</p>
+          </div>
+        </div>
+
+        <div class="terminal" aria-hidden="true">
+          <div class="terminal-chrome"><span class="chrome-dots"><i></i><i></i><i></i></span> ~/code/app</div>
+          <pre class="terminal-body"><span class="t-cmd">ownci start --detach</span><span class="t-ok">✓ Runner 'ownci-mybox' is listening for jobs on acme/app (pid 48213). Stop with: ownci stop</span><span class="t-gap"></span><span class="t-note"># PR #42 pushed: GitHub queues "build" for runs-on: [ownci]</span><span class="t-note"># your runner takes the job and starts container node:22</span><span class="t-note"># checkout · npm ci · npm test</span><span class="t-pass"># job succeeded: the check turns green on the PR</span><span class="t-note"># _work wiped in a throwaway container, ready for the next job</span></pre>
+        </div>
+        <p class="run-caption">Illustration · the first two lines are real OwnCI output</p>
+      </div>
+    </section>
+
+    <section class="split-section" aria-labelledby="problem-title">
+      <div class="section-heading">
+        <p class="section-kicker">The problem</p>
+        <h2 id="problem-title">Your CI waits in someone else’s queue while your own machine sits idle.</h2>
+      </div>
+      <div class="prose">
+        <p>
+          Most pull request checks run on hosted runners: shared virtual machines that start from a
+          clean image every time and, on private repositories, are billed by the minute. Meanwhile
+          the laptop or workstation you’re sitting at is usually doing nothing.
+        </p>
+        <p>
+          GitHub already lets you run jobs on your own hardware with <em>self-hosted runners</em>.
+          Turning one on is a small project, though: download and verify the runner, register it
+          with a token, keep the process alive, clean up between jobs, and remember how to take it
+          all out again. And by default a self-hosted runner runs job steps <em>directly on your
+          machine</em>, as you.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="pain-title">
+      <div class="section-heading">
+        <p class="section-kicker">What gets in the way</p>
+        <h2 id="pain-title">Three reasons people don’t use their own compute.</h2>
+      </div>
+      <div class="card-grid">
+        <article class="card problem">
+          <span class="card-number">01</span>
+          <h3>Hosted minutes add up</h3>
+          <p>On private repositories, hosted runner time is metered. Every push to every pull request spends some.</p>
+        </article>
+        <article class="card problem">
+          <span class="card-number">02</span>
+          <h3>Self-hosting is a chore</h3>
+          <p>Download, checksum, register, supervise, clean up, unregister: by hand, and again on every machine.</p>
+        </article>
+        <article class="card problem">
+          <span class="card-number">03</span>
+          <h3>A plain runner runs on your host</h3>
+          <p>A stock self-hosted runner executes steps directly on your machine and leaves files behind for the next job.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="compare-title">
+      <div class="section-heading">
+        <p class="section-kicker">What OwnCI changes</p>
+        <h2 id="compare-title">The official runner, without the busywork.</h2>
+        <p>
+          OwnCI doesn’t replace GitHub Actions or invent a new CI. It installs, supervises and
+          cleans up the official <code>actions/runner</code>, and configures it so jobs run in
+          containers.
+        </p>
+      </div>
+      <div class="compare">
+        <div class="compare-col">
+          <h3>A runner set up by hand</h3>
+          <ul>
+            <li>Find the right runner release and verify it yourself</li>
+            <li>Paste a registration token into <code>config.sh</code></li>
+            <li>Keep <code>run.sh</code> alive and restart it after a crash</li>
+            <li>Jobs run straight on your host</li>
+            <li>One job’s leftovers are still there for the next</li>
+            <li>The generic <code>self-hosted</code> label can catch any workflow</li>
+          </ul>
+        </div>
+        <div class="compare-col ours">
+          <h3>With OwnCI</h3>
+          <ul>
+            <li><code>ownci setup</code> downloads the pinned runner and checks its SHA-256 before registering</li>
+            <li>Your GitHub token is never stored, and the registration token is single-use</li>
+            <li>A supervisor restarts the runner with backoff; <code>ownci stop</code> stops it cleanly</li>
+            <li>Every job runs in a Docker container</li>
+            <li>The workspace is wiped after every job, and a failed wipe fails the job visibly</li>
+            <li>An opt-in <code>ownci</code> label, so a stray <code>runs-on: self-hosted</code> never lands on your laptop</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="lifecycle-title">
+      <div class="section-heading">
+        <p class="section-kicker">One command each</p>
+        <h2 id="lifecycle-title">Set it up, start it, stop it, remove it.</h2>
+      </div>
+      <div class="cmd-strip">
+        <div class="cmd"><code>ownci setup</code><p>Download and verify the runner, register it with your repository, install the isolation settings.</p></div>
+        <div class="cmd"><code>ownci start</code><p>Re-check isolation, clean up leftovers, and start taking jobs. Add <code>--detach</code> to run in the background.</p></div>
+        <div class="cmd"><code>ownci stop</code><p>Stop contributing compute. The registration is kept, so <code>start</code> brings it back.</p></div>
+        <div class="cmd"><code>ownci uninstall</code><p>Stop the runner and, if you ask, unregister it on GitHub and remove OwnCI’s files.</p></div>
+      </div>
+      <p class="callout"><strong>Not sure your machine is ready?</strong> <code>ownci doctor</code> checks the platform, your user, Docker, ICU and the isolation settings, and <code>ownci status</code> reports what is actually running.</p>
+    </section>
+
+    <section class="split-section" aria-labelledby="same-title">
+      <div class="section-heading">
+        <p class="section-kicker">What stays the same</p>
+        <h2 id="same-title">Your workflows, your PR checks, two lines different.</h2>
+      </div>
+      <div class="prose">
+        <p>
+          GitHub still owns workflows, queuing, scheduling and the check on the pull request. You
+          point a job at your runner with the <code>ownci</code> label and give it a container
+          image. That’s the whole change.
+        </p>
+        <Code label="workflow.yml" code={workflow} />
+        <p>
+          Workflows without a <code>container:</code> line can run unchanged in <a href="/docs/workflows/">container-runner mode</a>, and a team can share one workflow
+          so everyone’s jobs <a href="/docs/workflows/#team">run on their own machine</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="honest-title">
+      <div class="section-heading">
+        <p class="section-kicker">Built for code you trust</p>
+        <h2 id="honest-title">What OwnCI is, and what it isn’t.</h2>
+      </div>
+      <ul class="honest-list">
+        <li><span class="mark yes" aria-hidden="true">✓</span><span><strong>For private repositories whose workflows you trust</strong>: your own and your team’s.</span></li>
+        <li><span class="mark yes" aria-hidden="true">✓</span><span><strong>Containers and a clean workspace for every job</strong>, re-checked every time the runner starts.</span></li>
+        <li><span class="mark no" aria-hidden="true">!</span><span><strong>Not a sandbox for hostile code.</strong> The official runner mounts the Docker socket into job containers, so a job can control your Docker daemon. The container guards against accidents, not attacks.</span></li>
+        <li><span class="mark no" aria-hidden="true">!</span><span><strong>Public repositories are refused by default</strong>, because pull requests from forks could run code on your machine.</span></li>
+        <li><span class="mark no" aria-hidden="true">!</span><span><strong>Early days:</strong> Linux and WSL2 only, one job at a time per runner, and no auto-start on boot yet.</span></li>
+      </ul>
+      <p class="callout warn"><strong>Read the trust model before you point OwnCI at anything you don’t control.</strong> <a href="/security/">What OwnCI enforces, and what it doesn’t →</a></p>
+    </section>
+
+    <section class="cta-band">
+      <span class="cta-spark" aria-hidden="true">◉</span>
+      <div><p class="section-kicker">Ready when you are</p><h2>Run your next PR check on your own machine.</h2><p>Install, run <code>ownci doctor</code>, and set up your repository.</p></div>
+      <a class="button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
+    </section>
+  </main>
+</BaseLayout>

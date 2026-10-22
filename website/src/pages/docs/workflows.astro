@@ -1,0 +1,112 @@
+---
+import DocsShell from '../../components/DocsShell.astro'
+import Code from '../../components/Code.astro'
+
+const crSetup = `
+ownci setup --repo owner/name --mode container-runner    # or: --force --mode container-runner to switch
+ownci start --detach
+`
+
+const crWorkflow = `
+jobs:
+  build:
+    runs-on: [ownci]           # no container: needed
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y jq && make test
+`
+
+const customImage = `
+docker build -t my/runner:22.04 -f e2e/images/ubuntu22.Dockerfile .
+ownci setup --repo owner/name --mode container-runner --image my/runner:22.04
+`
+
+const teamSetup = `
+ownci setup --repo owner/name --labels <your-github-username>   # each developer, once
+`
+
+const teamWorkflow = `
+jobs:
+  build:
+    runs-on: [ownci, "\${{ github.actor }}"]   # the user who opened or pushed to the PR
+    container: node:22
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+`
+
+const severalRepos = `
+ownci --data-dir ~/.local/share/ownci-app setup --repo owner/app --name ownci-mybox-app
+ownci --data-dir ~/.local/share/ownci-app start --detach
+ownci --data-dir ~/.local/share/ownci-lib setup --repo owner/lib --name ownci-mybox-lib
+ownci --data-dir ~/.local/share/ownci-lib start --detach
+`
+---
+
+<DocsShell
+  title="Workflows"
+  description="Run workflows without a container: line, share one workflow file across a team, and serve several repositories from one machine."
+>
+  <section class="docs-section" id="container-runner">
+    <p class="section-kicker">Container-runner mode</p>
+    <h2>Run every job in a container, no <code>container:</code> needed</h2>
+    <p>
+      Workflows written for GitHub-hosted runners usually have no <code>container:</code> line. In
+      container-runner mode they run unchanged:
+    </p>
+    <Code label="shell" code={crSetup} />
+    <Code label=".github/workflows/ci.yml" code={crWorkflow} />
+    <ul>
+      <li><strong>Jobs without <code>container:</code></strong> run inside the runner container, as your user ID, with passwordless <code>sudo</code> and the Docker CLI.</li>
+      <li><strong>Jobs with <code>container:</code></strong> behave exactly as in host mode: the job container is a sibling on your Docker daemon.</li>
+      <li><strong>Every job gets a fresh container.</strong> Anything a job changes outside the workspace (<code>apt-get install</code>, <code>/tmp</code>, <code>$HOME</code>) is gone for the next one, and the workspace is wiped as in host mode. Expect a few seconds between jobs while the new container connects.</li>
+    </ul>
+    <h3>The runner image</h3>
+    <p>
+      The default is the official <code>ghcr.io/actions/actions-runner</code> (Ubuntu 24.04), pinned by
+      digest: about 2 GB, pulled once at setup. It has git, curl and the Docker CLI, but not the
+      hosted runners’ preinstalled toolchains; <code>actions/setup-*</code> actions install what you need.
+    </p>
+    <p>
+      <code>--image</code> picks another one, at <code>setup</code> or for one session at <code>start</code>.
+      It <strong>must</strong> contain <code>bash</code>, <code>setpriv</code>, <code>useradd</code>/<code>groupadd</code>/<code>usermod</code>, <code>getent</code>, <code>stat</code>, the <code>docker</code> CLI and ICU, and <strong>should</strong> contain <code>git</code> and <code>sudo</code>. <code>setup</code> refuses an image that lacks a required tool.
+    </p>
+    <Code label="shell" code={customImage} />
+    <p class="callout">
+      The runner directory must be mountable at its own path: a plain Linux path without symlinks,
+      not under <code>/mnt/c</code>. The default data directory is fine.
+    </p>
+  </section>
+
+  <section class="docs-section" id="team">
+    <p class="section-kicker">Teams</p>
+    <h2>One workflow file for a whole team</h2>
+    <p>
+      Give each developer’s runner their own label (their GitHub username) and let the workflow
+      pick the runner of whoever triggered it:
+    </p>
+    <Code label="shell" code={teamSetup} />
+    <Code label=".github/workflows/ci.yml" code={teamWorkflow} />
+    <ul>
+      <li>If a developer’s runner is offline, their job waits in the queue. It never lands on someone else’s runner.</li>
+      <li>Bots such as Dependabot match no runner.</li>
+      <li>Each developer needs admin access to the repository to run <code>ownci setup</code>.</li>
+      <li>Use <code>github.event.pull_request.user.login</code> instead of <code>github.actor</code> to target the PR <em>author</em> rather than whoever pushed last.</li>
+    </ul>
+  </section>
+
+  <section class="docs-section" id="several-repositories">
+    <p class="section-kicker">Several repositories</p>
+    <h2>One data directory per repository</h2>
+    <p>
+      One data directory holds one runner for one repository. For a second repository, give it its
+      own data directory and runner name:
+    </p>
+    <Code label="shell" code={severalRepos} />
+    <ul>
+      <li>Every later command (<code>status</code>, <code>logs</code>, <code>stop</code>, <code>uninstall</code>) needs the same <code>--data-dir</code>, or <code>export OWNCI_DATA_DIR=…</code> in that shell.</li>
+      <li>In container-runner mode the names must be distinct, because the runner container is called <code>ownci-&lt;runner name&gt;</code> and Docker container names are global.</li>
+      <li>The runners are independent: each runs one job at a time, and they share the machine’s CPU, memory and Docker daemon.</li>
+    </ul>
+  </section>
+</DocsShell>

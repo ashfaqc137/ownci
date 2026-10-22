@@ -1,0 +1,53 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+
+interface Props {
+  title: string
+  description: string
+}
+
+const { title, description } = Astro.props
+const currentPath = Astro.url.pathname
+const groups = [
+  {
+    label: 'START HERE',
+    links: [
+      { label: 'Get started', href: '/docs/' },
+      { label: 'Workflows', href: '/docs/workflows/' },
+    ],
+  },
+  {
+    label: 'REFERENCE',
+    links: [
+      { label: 'Commands', href: '/docs/commands/' },
+      { label: 'Troubleshooting', href: '/docs/troubleshooting/' },
+    ],
+  },
+]
+---
+
+<BaseLayout title={`${title} · OwnCI docs`} description={description}>
+  <main id="main" class="content-page docs-page">
+    <section class="page-hero">
+      <p class="eyebrow"><span class="eyebrow-dot"></span> Documentation</p>
+      <h1>{title}</h1>
+      <p class="lead">{description}</p>
+    </section>
+
+    <div class="docs-layout">
+      <nav class="docs-sidebar" aria-label="Documentation">
+        {groups.map((group) => (
+          <div class="docs-nav-group">
+            <p>{group.label}</p>
+            {group.links.map((link) => (
+              <a href={link.href} aria-current={currentPath === link.href ? 'page' : undefined}>
+                {link.label}
+              </a>
+            ))}
+          </div>
+        ))}
+      </nav>
+      <article class="docs-content"><slot /></article>
+    </div>
+  </main>
+</BaseLayout>

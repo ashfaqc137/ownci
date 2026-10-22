@@ -1,0 +1,111 @@
+---
+import DocsShell from '../../components/DocsShell.astro'
+import Code from '../../components/Code.astro'
+
+const installRelease = `
+sha256sum -c --ignore-missing SHA256SUMS        # must print: ownci_<version>_linux_<arch>.tar.gz: OK
+tar -xzf ownci_<version>_linux_<arch>.tar.gz
+install -m 0755 ownci ~/.local/bin/ownci        # make sure ~/.local/bin is on your PATH
+ownci version
+`
+
+const installSource = `
+git clone https://github.com/ashfaqc137/ownci.git
+cd ownci
+make build                                      # builds bin/ownci
+install -m 0755 bin/ownci ~/.local/bin/ownci
+`
+
+const quickStart = `
+ownci doctor                              # everything PASS?
+ownci setup --repo owner/name             # downloads + verifies the runner, registers it, installs isolation
+ownci start --detach                      # runs in the background (without --detach: foreground, Ctrl-C stops)
+ownci status --remote                     # online, idle
+`
+
+const workflow = `
+jobs:
+  build:
+    runs-on: [ownci]            # the opt-in label OwnCI registers (not "self-hosted")
+    container: ubuntu:24.04     # mandatory: jobs without a container are rejected
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+`
+
+const stopping = `
+ownci stop                                # stop taking jobs; registration and files are kept
+ownci start --detach                      # the same registration comes back
+ownci uninstall --unregister --purge      # remove it from GitHub and delete OwnCI's files
+`
+---
+
+<DocsShell
+  title="Get started"
+  description="Install OwnCI, check your machine, register a runner for your repository and run your first job on it."
+>
+  <section class="docs-section" id="requirements">
+    <p class="section-kicker">Step 1</p>
+    <h2>Requirements</h2>
+    <ul>
+      <li><strong>Linux or WSL2</strong> on amd64 or arm64, and a <strong>non-root</strong> user (the runner refuses root). Native Windows and macOS are not supported yet.</li>
+      <li>
+        <strong>Docker</strong> with a Linux daemon that your user can reach.
+        On WSL2 with Docker Desktop, enable your distro under <em>Settings → Resources → WSL integration</em>.
+        On native Linux, <a href="https://docs.docker.com/engine/install/" rel="noreferrer">install Docker Engine</a> and add yourself to the <code>docker</code> group.
+      </li>
+      <li><strong>ICU</strong> for the runner: <code>sudo apt-get install -y libicu-dev</code> on Debian/Ubuntu, <code>sudo dnf install libicu</code> on Fedora.</li>
+      <li>
+        A <strong>GitHub token with admin access to the repository</strong>, only for <code>setup</code>, <code>uninstall --unregister</code> and <code>status --remote</code>. OwnCI looks at <code>GITHUB_TOKEN</code>, then <code>GH_TOKEN</code>, then <code>gh auth login</code>. A fine-grained
+        token needs <em>Administration: Read and write</em> on the repository. The token is never stored.
+      </li>
+    </ul>
+  </section>
+
+  <section class="docs-section" id="install">
+    <p class="section-kicker">Step 2</p>
+    <h2>Install</h2>
+    <h3>From a release</h3>
+    <p>
+      Download the archive for your architecture and <code>SHA256SUMS</code> from the <a href="https://github.com/ashfaqc137/ownci/releases" rel="noreferrer">Releases page</a>, then verify and install it:
+    </p>
+    <Code label="shell" code={installRelease} />
+    <h3>From source</h3>
+    <p>With Go installed (see <code>go.mod</code> for the version), build the release configuration yourself:</p>
+    <Code label="shell" code={installSource} />
+    <p>
+      OwnCI keeps its data in <code>~/.local/share/ownci</code>. <code>--data-dir</code>, <code>$OWNCI_DATA_DIR</code> or <code>$XDG_DATA_HOME/ownci</code> override it. On WSL, keep it on
+      the Linux filesystem, not under <code>/mnt/c</code>.
+    </p>
+  </section>
+
+  <section class="docs-section" id="quick-start">
+    <p class="section-kicker">Step 3</p>
+    <h2>Set up and start</h2>
+    <Code label="shell" code={quickStart} />
+    <p>
+      <code>ownci doctor</code> is read-only: it checks the platform, your user, the data directory,
+      ICU, Docker and the isolation settings, and exits with code 3 if something fails.
+    </p>
+  </section>
+
+  <section class="docs-section" id="first-workflow">
+    <p class="section-kicker">Step 4</p>
+    <h2>Point a workflow at your runner</h2>
+    <p>In host mode (the default), <strong>both lines are required</strong>:</p>
+    <Code label=".github/workflows/ci.yml" code={workflow} />
+    <p>
+      Open a pull request and watch the check run on your machine. For workflows without a <code>container:</code> line, see <a href="/docs/workflows/">container-runner mode</a>.
+    </p>
+  </section>
+
+  <section class="docs-section" id="stop">
+    <p class="section-kicker">Step 5</p>
+    <h2>Stop or remove it</h2>
+    <Code label="shell" code={stopping} />
+    <p>
+      <code>ownci uninstall</code> without flags only stops the runner and explains what is left.
+      See <a href="/docs/commands/">all commands</a>.
+    </p>
+  </section>
+</DocsShell>
