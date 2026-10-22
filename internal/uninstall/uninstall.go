@@ -287,10 +287,14 @@ func (r *run) removeContainer(ctx context.Context) {
 	if _, err := r.d.Exec.LookPath("docker"); err != nil {
 		return
 	}
-	if _, err := runnercontainer.Inspect(ctx, r.d.Exec, r.name); err != nil {
+	info, err := runnercontainer.Inspect(ctx, r.d.Exec, r.name)
+	if err != nil {
 		return
 	}
-	if err := runnercontainer.Remove(ctx, r.d.Exec, r.name); err != nil {
+	if !info.Owned(r.d.Paths.Root) {
+		return // another data directory's runner of the same name: not ours
+	}
+	if err := runnercontainer.Remove(ctx, r.d.Exec, r.name, r.d.Paths.Root); err != nil {
 		fmt.Fprintf(r.d.Err, "Warning: %v (remove it with 'docker rm -f %s')\n", err, runnercontainer.ContainerName(r.name))
 		return
 	}

@@ -51,13 +51,27 @@ func (e *Error) Error() string    { return e.Msg }
 func (e *Error) UserHint() string { return e.Hint }
 
 // ContainerName is the fixed name of a runner's container, so a leftover can
-// always be found and removed.
+// always be found and removed. Container names are global to the Docker
+// daemon, so two data directories with the same runner name share it; the
+// DataDirLabel tells them apart.
 func ContainerName(runner string) string { return "ownci-" + runner }
+
+// DataDirLabel records which OwnCI data directory started a runner container.
+const DataDirLabel = "ownci.datadir"
+
+// ErrForeignContainer means the runner's container belongs to another OwnCI
+// data directory (a runner of the same name set up for another repository).
+var ErrForeignContainer = errors.New("container belongs to another OwnCI data directory")
+
+// ForeignHint is the hint for ErrForeignContainer.
+const ForeignHint = "Each OwnCI data directory needs its own runner name in container-runner mode. " +
+	"Give this one another name: 'ownci uninstall --unregister', then 'ownci setup --repo owner/name --name <unique name>'."
 
 // Spec describes one runner container.
 type Spec struct {
 	Runner    string // runner name
 	RunnerDir string // absolute and symlink-free (see CheckPath)
+	DataDir   string // the OwnCI data directory, recorded as DataDirLabel
 	Image     string
 	UID, GID  int // the host user the runner runs as inside the container
 }
@@ -75,6 +89,7 @@ func Args(s Spec) []string {
 		"run", "--rm", "--init", "--pull", "never",
 		"--name", ContainerName(s.Runner),
 		"--label", "ownci.managed=true", "--label", "ownci.runner=" + s.Runner,
+		"--label", DataDirLabel + "=" + s.DataDir,
 		"--user", "0:0",
 		"-v", dir + ":" + dir, "-w", dir,
 		"-v", hook + ":" + hook + ":ro",
@@ -143,8 +158,19 @@ const (
 // session. A container that is only killed leaves the session behind, and the
 // next runner then waits about a minute on "A session for this runner already
 // exists … Conflict" (seen 2026-10-22 after `kill -9` of the supervisor).
-func Remove(ctx context.Context, ex execx.Runner, runner string) error {
+//
+// A container another data directory started (see Owned) is left alone and
+// reported as ErrForeignContainer: it is another repository's runner.
+func Remove(ctx context.Context, ex execx.Runner, runner, dataDir string) error {
 	name := ContainerName(runner)
+	info, err := Inspect(ctx, ex, runner)
+	switch {
+	case errors.Is(err, ErrNoContainer):
+		return nil
+	case err == nil && !info.Owned(dataDir):
+		return fmt.Errorf("%s: %w (%s)", name, ErrForeignContainer, info.DataDir)
+	}
+	// Other inspect failures (daemon down, …) surface from stop/rm below.
 	stopCtx, cancel := context.WithTimeout(ctx, dockerTimeout+stopGrace*time.Second)
 	_, _ = ex.Run(stopCtx, execx.Cmd{Name: "docker", Args: []string{"stop", "--signal", "SIGINT", "--time", strconv.Itoa(stopGrace), name}})
 	cancel()
@@ -166,16 +192,22 @@ var ErrNoContainer = errors.New("no such container")
 
 // Info is what Docker reports about a runner container.
 type Info struct {
-	State string `json:"state"` // running, exited, …
-	Image string `json:"image"`
+	State   string `json:"state"` // running, exited, …
+	Image   string `json:"image"`
+	DataDir string `json:"dataDir,omitempty"` // DataDirLabel; empty for containers of older versions
 }
+
+// Owned reports whether the container belongs to dataDir. A container without
+// the label (started by an older OwnCI) counts as owned, as before the label.
+func (i Info) Owned(dataDir string) bool { return i.DataDir == "" || i.DataDir == dataDir }
 
 // Inspect returns Docker's view of the runner's container, or ErrNoContainer.
 func Inspect(ctx context.Context, ex execx.Runner, runner string) (Info, error) {
 	ctx, cancel := context.WithTimeout(ctx, dockerTimeout)
 	defer cancel()
+	format := `{{.State.Status}} {{.Config.Image}} {{index .Config.Labels "` + DataDirLabel + `"}}`
 	res, err := ex.Run(ctx, execx.Cmd{Name: "docker", Args: []string{
-		"inspect", "--type", "container", "--format", "{{.State.Status}} {{.Config.Image}}", ContainerName(runner),
+		"inspect", "--type", "container", "--format", format, ContainerName(runner),
 	}})
 	if err != nil {
 		return Info{}, err
@@ -186,8 +218,10 @@ func Inspect(ctx context.Context, ex execx.Runner, runner string) (Info, error) 
 		}
 		return Info{}, fmt.Errorf("docker inspect: %s", strings.TrimSpace(string(res.Stderr)))
 	}
-	state, image, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), " ")
-	return Info{State: state, Image: image}, nil
+	// The data dir comes last: it is the only field that may contain spaces.
+	state, rest, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), " ")
+	image, dataDir, _ := strings.Cut(rest, " ")
+	return Info{State: state, Image: image, DataDir: dataDir}, nil
 }
 
 // probeScript lists what the runner container needs from an image: the

@@ -171,6 +171,28 @@ developer needs admin access to the repository to run `ownci setup`. Use
 `github.event.pull_request.user.login` instead of `github.actor` if you want the PR *author*
 rather than whoever pushed last.
 
+### Several repositories
+
+One data directory holds one runner for one repository. For a second repository, give it
+its own data directory and a runner name of its own:
+
+```bash
+ownci --data-dir ~/.local/share/ownci-app setup --repo owner/app --name ownci-mybox-app
+ownci --data-dir ~/.local/share/ownci-app start --detach
+ownci --data-dir ~/.local/share/ownci-lib setup --repo owner/lib --name ownci-mybox-lib
+ownci --data-dir ~/.local/share/ownci-lib start --detach
+```
+
+- Every later command (`status`, `logs`, `stop`, `uninstall`) needs the same `--data-dir`,
+  or `export OWNCI_DATA_DIR=…` in that shell. Without one it acts on the default
+  `~/.local/share/ownci`.
+- **Container-runner mode needs distinct names:** the runner container is called
+  `ownci-<runner name>`, and Docker container names are global. OwnCI refuses a name whose
+  container belongs to another data directory and never stops or removes such a container.
+  In host mode the same name works, but distinct names are clearer on GitHub.
+- The runners are independent: each runs one job at a time, and they share the machine's
+  CPU, memory and Docker daemon.
+
 ## Commands
 
 | Command | What it does |
@@ -249,7 +271,8 @@ OwnCI does **not** claim to safely run arbitrary untrusted pull request code.
 
 ## Limitations
 
-- One job at a time (one runner per data directory).
+- One job at a time (one runner per data directory; use one data directory per repository,
+  see [Several repositories](#several-repositories)).
 - Container-runner mode starts the runner with `run.sh --once`, which the runner marks as
   deprecated in favor of ephemeral registrations. If a future runner drops it, OwnCI will
   report the runner as crashing; see [`tasks/future.md`](tasks/future.md).
@@ -275,6 +298,8 @@ Start with `ownci doctor` and `ownci status`. Logs: `ownci logs`, `ownci logs --
 | `running as root` | Run ownci as a normal user. |
 | `ICU library (libicuuc) not found` / runner crashes at start | Install ICU (see Prerequisites) or run `<data-dir>/runners/<name>/bin/installdependencies.sh` with sudo. |
 | `data-dir … is on a Windows mount` | Use a Linux path: `--data-dir ~/.local/share/ownci`. |
+| `OwnCI is already set up for <repo> …; this data directory holds one runner` | To run a second repository alongside it, use another `--data-dir` (see [Several repositories](#several-repositories)). |
+| `… container belongs to another OwnCI data directory` / `container name … is in use` (container-runner mode) | Another data directory has a runner of the same name. Give this one another name: `ownci uninstall --unregister`, then `ownci setup --repo … --name <unique>`. |
 | `… is a public repository` | Use a private repo, or `--allow-public-repo` if you accept the risk. |
 | `the GitHub token has no admin access` | Use a token with admin on the repository (see Prerequisites). |
 | `no GitHub token found` | `export GITHUB_TOKEN=…` or `gh auth login`. |

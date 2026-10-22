@@ -343,8 +343,9 @@ func (r *run) detectExisting() (prev *config.RunnerConfig, registered bool, err 
 		// uninstall first, force or not.
 		if prev.Repo != r.repo.String() {
 			return nil, false, &Error{
-				Msg:  fmt.Sprintf("OwnCI is already set up for %s as '%s'; this data directory holds one runner", prev.Repo, prev.Name),
-				Hint: "Run 'ownci uninstall --unregister' first, then set up " + r.repo.String() + ". (--force cannot switch repositories.)",
+				Msg: fmt.Sprintf("OwnCI is already set up for %s as '%s'; this data directory holds one runner", prev.Repo, prev.Name),
+				Hint: "To run both, set up " + r.repo.String() + " in a separate data directory: 'ownci --data-dir <another dir> setup --repo " +
+					r.repo.String() + " --name <unique name>' (see README, \"Several repositories\"). To replace it, run 'ownci uninstall --unregister' first. (--force cannot switch repositories.)",
 			}
 		}
 		if r.o.Name == "" {
@@ -477,6 +478,15 @@ func (r *run) install(ctx context.Context, reuse bool, prev *config.RunnerConfig
 // prepareImage pulls the runner image unless it is present (it may be built
 // locally) and probes that it can host the runner.
 func (r *run) prepareImage(ctx context.Context) error {
+	// Container names are global to the daemon: a runner of the same name in
+	// another data directory would have its container removed by ours.
+	if info, err := runnercontainer.Inspect(ctx, r.d.Exec, r.name); err == nil && !info.Owned(r.d.Paths.Root) {
+		return &Error{
+			Msg: fmt.Sprintf("the container name %s is in use by the runner of another OwnCI data directory (%s)",
+				runnercontainer.ContainerName(r.name), info.DataDir),
+			Hint: "Choose another --name for this runner (an existing setup needs 'ownci uninstall --unregister' first).",
+		}
+	}
 	if _, err := docker.EnsureImage(ctx, r.d.Exec, r.image); err != nil {
 		return &Error{Msg: err.Error(), Hint: hintOr(err, "Check the image name and your network."), Err: err}
 	}

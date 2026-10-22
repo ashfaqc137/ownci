@@ -15,12 +15,13 @@ import (
 
 func TestArgsGolden(t *testing.T) {
 	dir := "/home/dev/.local/share/ownci/runners/ownci-box"
-	got := Args(Spec{Runner: "ownci-box", RunnerDir: dir, Image: "img@sha256:abc", UID: 1000, GID: 1001})
+	got := Args(Spec{Runner: "ownci-box", RunnerDir: dir, DataDir: "/home/dev/.local/share/ownci", Image: "img@sha256:abc", UID: 1000, GID: 1001})
 	hook := dir + "/ownci/job-completed.sh"
 	want := []string{
 		"run", "--rm", "--init", "--pull", "never",
 		"--name", "ownci-ownci-box",
 		"--label", "ownci.managed=true", "--label", "ownci.runner=ownci-box",
+		"--label", "ownci.datadir=/home/dev/.local/share/ownci",
 		"--user", "0:0",
 		"-v", dir + ":" + dir, "-w", dir,
 		"-v", hook + ":" + hook + ":ro",
@@ -124,30 +125,45 @@ func TestCheckPath(t *testing.T) {
 
 func TestRemove(t *testing.T) {
 	ctx := context.Background()
+	const root = "/home/dev/.local/share/ownci"
+	for _, owner := range []string{root, ""} { // ours, or from an OwnCI without the label
+		f := execx.NewFake()
+		f.On("docker", "inspect").Stdout("running img " + owner + "\n")
+		f.On("docker", "stop").Stdout("ownci-r1\n")
+		f.On("docker", "rm").Stdout("ownci-r1\n")
+		if err := Remove(ctx, f, "r1", root); err != nil {
+			t.Fatal(err)
+		}
+		// SIGINT first, so the listener closes its GitHub session; then remove.
+		calls := f.Calls()
+		if len(calls) != 3 || strings.Join(calls[1].Args, " ") != "stop --signal SIGINT --time 30 ownci-r1" ||
+			strings.Join(calls[2].Args, " ") != "rm --force ownci-r1" {
+			t.Errorf("owner %q: calls = %+v", owner, calls)
+		}
+	}
+
+	// Another data directory's runner of the same name is left alone.
 	f := execx.NewFake()
-	f.On("docker", "stop").Stdout("ownci-r1\n")
-	f.On("docker", "rm").Stdout("ownci-r1\n")
-	if err := Remove(ctx, f, "r1"); err != nil {
-		t.Fatal(err)
+	f.On("docker", "inspect").Stdout("running img /home/dev/ownci-b\n")
+	err := Remove(ctx, f, "r1", root)
+	if !errors.Is(err, ErrForeignContainer) || !strings.Contains(err.Error(), "/home/dev/ownci-b") {
+		t.Errorf("foreign container: %v", err)
 	}
-	// SIGINT first, so the listener closes its GitHub session; then remove.
-	calls := f.Calls()
-	if len(calls) != 2 || strings.Join(calls[0].Args, " ") != "stop --signal SIGINT --time 30 ownci-r1" ||
-		strings.Join(calls[1].Args, " ") != "rm --force ownci-r1" {
-		t.Errorf("calls = %+v", calls)
+	if len(f.Calls()) != 1 {
+		t.Errorf("foreign container touched: %+v", f.Calls())
 	}
 
 	f = execx.NewFake()
-	f.On("docker", "stop").Exit(1).Stderr("Error response from daemon: No such container: ownci-r1")
-	f.On("docker", "rm").Exit(1).Stderr("Error response from daemon: No such container: ownci-r1")
-	if err := Remove(ctx, f, "r1"); err != nil {
-		t.Errorf("missing container: %v", err)
+	f.On("docker", "inspect").Exit(1).Stderr("Error: No such object: ownci-r1")
+	if err := Remove(ctx, f, "r1", root); err != nil || len(f.Calls()) != 1 {
+		t.Errorf("missing container: %v, calls %+v", err, f.Calls())
 	}
 
 	f = execx.NewFake()
+	f.On("docker", "inspect").Exit(1).Stderr("Cannot connect to the Docker daemon")
 	f.On("docker", "stop").Exit(1).Stderr("Cannot connect to the Docker daemon")
 	f.On("docker", "rm").Exit(1).Stderr("Cannot connect to the Docker daemon")
-	if err := Remove(ctx, f, "r1"); err == nil || !strings.Contains(err.Error(), "Cannot connect") {
+	if err := Remove(ctx, f, "r1", root); err == nil || !strings.Contains(err.Error(), "Cannot connect") {
 		t.Errorf("daemon down: %v", err)
 	}
 }
@@ -157,11 +173,18 @@ func TestInspect(t *testing.T) {
 	f := execx.NewFake()
 	f.On("docker", "inspect").Stdout("running img@sha256:abc\n")
 	info, err := Inspect(ctx, f, "r1")
-	if err != nil || info.State != "running" || info.Image != "img@sha256:abc" {
+	if err != nil || info.State != "running" || info.Image != "img@sha256:abc" || info.DataDir != "" || !info.Owned("/any") {
 		t.Errorf("Inspect = %+v, %v", info, err)
 	}
-	if c := f.Calls()[0]; c.Args[len(c.Args)-1] != "ownci-r1" {
+	if c := f.Calls()[0]; c.Args[len(c.Args)-1] != "ownci-r1" || !strings.Contains(strings.Join(c.Args, " "), `"ownci.datadir"`) {
 		t.Errorf("call = %v", c.Args)
+	}
+
+	f = execx.NewFake()
+	f.On("docker", "inspect").Stdout("exited img@sha256:abc /home/dev/my data\n")
+	info, err = Inspect(ctx, f, "r1")
+	if err != nil || info.State != "exited" || info.DataDir != "/home/dev/my data" || info.Owned("/home/dev/other") || !info.Owned("/home/dev/my data") {
+		t.Errorf("Inspect with label = %+v, %v", info, err)
 	}
 
 	f = execx.NewFake()

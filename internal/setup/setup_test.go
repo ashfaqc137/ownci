@@ -384,6 +384,10 @@ func TestDifferentRepoOrNameRefusedEvenWithForce(t *testing.T) {
 	}
 	err := e.run(Options{Repo: "me/other", Force: true})
 	wantErr(t, err, "already set up for me/demo", "uninstall")
+	// A second repository goes into a second data directory.
+	if h := hintOf(err); !strings.Contains(h, "--data-dir") || !strings.Contains(h, "setup --repo me/other --name") {
+		t.Errorf("hint %q does not point to a separate data directory", h)
+	}
 	err = e.run(Options{Name: "ownci-second", Force: true})
 	wantErr(t, err, "already set up for me/demo", "uninstall")
 	if e.loadConfig().Repo != "me/demo" {
@@ -684,6 +688,18 @@ func TestContainerRunnerCustomImageAndProbeFailure(t *testing.T) {
 	}
 	if pulls := strings.Join(dockerCalls(e.fake, "pull"), "\n"); !strings.Contains(pulls, "ubuntu:24.04") {
 		t.Errorf("custom image not pulled:\n%s", pulls)
+	}
+}
+
+func TestContainerRunnerRefusesForeignContainerName(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	e.fake.On("docker", "run").Stdout("ok\n") // the image probe
+	e.fake.On("docker", "inspect").Stdout("running " + runnercontainer.DefaultImage + " /home/dev/ownci-other\n")
+	err := e.run(Options{Mode: config.ModeContainerRunner})
+	wantErr(t, err, "container name ownci-ownci-box is in use by the runner of another OwnCI data directory (/home/dev/ownci-other)", "--name")
+	e.noConfig()
+	if runner.Registered(e.runnerDir("ownci-box")) || len(e.fg.Snapshot().Tokens) != 0 {
+		t.Error("a taken container name was only found after registering")
 	}
 }
 

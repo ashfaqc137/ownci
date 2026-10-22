@@ -74,10 +74,14 @@ runner back. A running job is cancelled. If the runner does not stop within
 // runner's GitHub session.
 func removeLeftoverContainer(ctx context.Context, app *App, name string) {
 	ex := newExecRunner(app.Logger)
-	if _, err := runnercontainer.Inspect(ctx, ex, name); err != nil {
+	info, err := runnercontainer.Inspect(ctx, ex, name)
+	if err != nil {
 		return // none, or Docker is unavailable: nothing we can remove
 	}
-	if err := runnercontainer.Remove(ctx, ex, name); err != nil {
+	if !info.Owned(app.Paths.Root) {
+		return // another data directory's runner of the same name: not ours
+	}
+	if err := runnercontainer.Remove(ctx, ex, name, app.Paths.Root); err != nil {
 		fmt.Fprintf(app.Err, "Warning: %v\n", err)
 		return
 	}

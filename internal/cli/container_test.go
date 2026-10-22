@@ -160,6 +160,38 @@ func TestStopRemovesLeftoverContainer(t *testing.T) {
 	}
 }
 
+// A runner of the same name set up in another data directory (another
+// repository) owns the container name: start, stop and status leave its
+// container alone.
+func TestForeignContainerIsLeftAlone(t *testing.T) {
+	p, fd := installContainerRunner(t)
+	container := runnercontainer.ContainerName(testRunner)
+	other := filepath.Join(t.TempDir(), "ownci-other")
+	fd.SetContainer(container, "running "+testImage+" "+other)
+
+	_, stderr, code := runCLI(t, "--data-dir", p.Root, "start")
+	if code == 0 || !strings.Contains(stderr, "another OwnCI data directory") || !strings.Contains(stderr, other) ||
+		!strings.Contains(stderr, "--name <unique name>") {
+		t.Errorf("start: code %d\n%s", code, stderr)
+	}
+	if runnerLaunches(fd) != 0 {
+		t.Error("the runner was launched although its container name is taken")
+	}
+
+	stdout, _, code := runCLI(t, "--data-dir", p.Root, "stop")
+	if code != 0 || strings.Contains(stdout, "Removed") {
+		t.Errorf("stop: code %d\n%s", code, stdout)
+	}
+
+	stdout, _, _ = runCLI(t, "--data-dir", p.Root, "status")
+	if !strings.Contains(stdout, "container "+container+": in use by the runner of "+other) {
+		t.Errorf("status:\n%s", stdout)
+	}
+	if !fd.ContainerExists(container) || len(fd.CallsMatching("rm")) != 0 || len(fd.CallsMatching("stop")) != 0 {
+		t.Errorf("the other data directory's container was touched:\n%s", strings.Join(fd.Calls(), "\n"))
+	}
+}
+
 func TestDoctorContainerRunner(t *testing.T) {
 	p, _ := installContainerRunner(t)
 	if err := isolation.Install(t.Context(), healthyFake(), p.RunnerDir(testRunner), isolation.PolicyFor(&config.RunnerConfig{Mode: config.ModeContainerRunner, Image: testImage}, "")); err != nil {

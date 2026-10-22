@@ -94,6 +94,9 @@ type containerStatus struct {
 	State string `json:"state"` // running, exited, … or "none"
 	Image string `json:"image,omitempty"`
 	Error string `json:"error,omitempty"`
+	// ForeignDataDir is set when the container name is taken by the runner of
+	// another data directory (State is then "none" for this one).
+	ForeignDataDir string `json:"foreignDataDir,omitempty"`
 }
 
 type dockerStatus struct {
@@ -243,6 +246,8 @@ func gatherStatus(ctx context.Context, app *App, remote bool) *statusReport {
 			cs.State = "none"
 		case err != nil:
 			cs.Error = err.Error()
+		case !info.Owned(app.Paths.Root):
+			cs.State, cs.ForeignDataDir = "none", info.DataDir
 		default:
 			cs.State, cs.Image = info.State, info.Image
 		}
@@ -409,6 +414,8 @@ func modeLine(r *statusReport) string {
 		switch {
 		case c.Error != "":
 			line += fmt.Sprintf("   container %s: unknown (%s)", c.Name, c.Error)
+		case c.ForeignDataDir != "":
+			line += fmt.Sprintf("   container %s: in use by the runner of %s (use another --name)", c.Name, c.ForeignDataDir)
 		case c.Image != "" && c.Image != r.Image:
 			line += fmt.Sprintf("   container %s: %s (image %s)", c.Name, c.State, c.Image)
 		default:

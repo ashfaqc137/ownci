@@ -35,7 +35,10 @@ func beforeLaunch(ctx context.Context, app *App, cfg *config.Config, pol isolati
 			return &UserError{Msg: err.Error(), Hint: hintOf(err)}
 		}
 		// A container left by a killed supervisor holds the GitHub session.
-		if err := runnercontainer.Remove(ctx, ex, cfg.Runner.Name); err != nil {
+		if err := runnercontainer.Remove(ctx, ex, cfg.Runner.Name, app.Paths.Root); err != nil {
+			if errors.Is(err, runnercontainer.ErrForeignContainer) {
+				return &UserError{Msg: err.Error(), Hint: runnercontainer.ForeignHint}
+			}
 			return &UserError{Msg: err.Error(), Hint: "Run 'docker rm -f " + runnercontainer.ContainerName(cfg.Runner.Name) + "', then start again."}
 		}
 	}
@@ -73,11 +76,11 @@ func runSupervisor(ctx context.Context, app *App, cfg *config.Config, mode strin
 	if pol.Mode == config.ModeContainerRunner {
 		name, ex := cfg.Runner.Name, newExecRunner(app.Logger)
 		o.Command = append([]string{"docker"}, runnercontainer.Args(runnercontainer.Spec{
-			Runner: name, RunnerDir: app.Paths.RunnerDir(name), Image: pol.RunnerImage,
+			Runner: name, RunnerDir: app.Paths.RunnerDir(name), DataDir: app.Paths.Root, Image: pol.RunnerImage,
 			UID: os.Getuid(), GID: os.Getgid(),
 		})...)
 		o.AfterExit = func(ctx context.Context) {
-			if err := runnercontainer.Remove(ctx, ex, name); err != nil {
+			if err := runnercontainer.Remove(ctx, ex, name, app.Paths.Root); err != nil {
 				app.Logger.Warn("removing the runner container failed", "err", err)
 			}
 		}

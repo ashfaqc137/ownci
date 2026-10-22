@@ -12,7 +12,7 @@
 # Runner containers (container-runner mode) are emulated: `docker run` with the
 # ownci-entrypoint marker runs the command after it in the -w directory with
 # the -e variables, and <dir>/container-<name> exists while it runs (`inspect`
-# and `rm` look at it).
+# prints it as "<state> <image> <ownci.datadir label>"; `rm` deletes it).
 if [ -n "${FAKE_DOCKER_LOG:-}" ]; then
   printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 fi
@@ -24,7 +24,7 @@ image_present() {
 }
 
 run_runner_container() {
-  local workdir="" name="" image="" i
+  local workdir="" name="" image="" datadir="" i
   local -a envs=() cmd=()
   local args=("$@")
   for ((i = 0; i < ${#args[@]}; i++)); do
@@ -32,6 +32,7 @@ run_runner_container() {
       -w) workdir="${args[i + 1]}"; i=$((i + 1)) ;;
       -e) envs+=("${args[i + 1]}"); i=$((i + 1)) ;;
       --name) name="${args[i + 1]}"; i=$((i + 1)) ;;
+      --label) case "${args[i + 1]}" in ownci.datadir=*) datadir="${args[i + 1]#ownci.datadir=}" ;; esac; i=$((i + 1)) ;;
       --entrypoint) image="${args[i + 2]}"; i=$((i + 2)) ;;
       ownci-entrypoint) cmd=("${args[@]:i + 1}"); break ;;
     esac
@@ -44,7 +45,7 @@ run_runner_container() {
     echo "docker: Error response from daemon: Conflict. The container name \"/$name\" is already in use." >&2
     exit 125
   fi
-  [ -z "$state" ] || echo "running $image" > "$state/container-$name"
+  [ -z "$state" ] || echo "running $image $datadir" > "$state/container-$name"
   # The supervisor signals the whole process group; let run.sh handle it.
   trap ':' INT TERM
   (cd "$workdir" && env "${envs[@]}" "${cmd[@]}")
