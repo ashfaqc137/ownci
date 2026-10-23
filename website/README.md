@@ -36,7 +36,7 @@ family. `src/styles/sparshlabs.css` is a copy of `theme/sparshlabs.css` in the
 [sparshlabs repo](https://github.com/ashfaqc137/sparshlabs): change the theme there and run
 `npm run sync-theme` in that repo, which rewrites this copy.
 
-- **Accent** `--accent` (sparshlabs lime), solid for primary buttons and the logo, and as tints
+- **Accent** `--accent` (sparshlabs signal cyan), solid for primary buttons and the logo, and as tints
   (`--accent-08/14/25/40`) for active nav, highlighted cards and callouts.
 - **Base** `--bg #11120f`, surfaces `--surface-1..4`, text ramp `--text` → `--text-faint`,
   `--emph` for the second line of headlines.

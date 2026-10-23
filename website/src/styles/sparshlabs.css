@@ -8,7 +8,7 @@
   color-scheme: dark;
 
   --bg: #11120f;
-  --bg-glow: rgba(105, 114, 69, 0.11);
+  --bg-glow: rgba(70, 118, 112, 0.12);
   --surface-1: #151712;
   --surface-2: #1b1d18;
   --surface-3: #22251e;
@@ -25,21 +25,21 @@
   --text-body: #a8aa9f;
   --text-muted: #8d8f84;
   --text-faint: #74786b;
-  --emph: #a8b18e;
+  --emph: #93b5ae;
 
   --line: rgba(245, 241, 234, 0.12);
   --line-strong: rgba(245, 241, 234, 0.2);
 
-  /* The one sparshlabs accent. Change it here and every site follows. */
-  --accent: #d3f36b;
-  --accent-hover: #e0fa8a;
-  --accent-soft: #d9e9a8;
-  --accent-muted: #9da77c;
-  --accent-ink: #202218;
-  --accent-08: rgba(211, 243, 107, 0.08);
-  --accent-14: rgba(211, 243, 107, 0.14);
-  --accent-25: rgba(211, 243, 107, 0.25);
-  --accent-40: rgba(211, 243, 107, 0.4);
+  /* The one sparshlabs accent (signal cyan). Change it here and every site follows. */
+  --accent: #6ee7d8;
+  --accent-hover: #9cf0e6;
+  --accent-soft: #b6efe7;
+  --accent-muted: #93b5ae;
+  --accent-ink: #0f2220;
+  --accent-08: rgba(110, 231, 216, 0.08);
+  --accent-14: rgba(110, 231, 216, 0.14);
+  --accent-25: rgba(110, 231, 216, 0.25);
+  --accent-40: rgba(110, 231, 216, 0.4);
 
   --pass: #a6d58f;
   --pass-bg: rgba(166, 213, 143, 0.1);
