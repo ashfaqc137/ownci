@@ -64,3 +64,18 @@
 
 **Problem.** In container-runner mode a job without `container:` runs as the runner's uid with the whole runner directory mounted read-write, so it can read `.credentials*` or modify `bin/`. The Docker socket already gives such a job control of the host, so this is a hardening item, not a new boundary. Ideas: mount the runner tree read-only except `_work`, `_diag` and the paths self-update writes (needs investigation of what the runner writes at runtime); run jobs as a second uid; or move the credentials out of the mounted tree.
 
+
+## F5 — macOS and native Windows support
+
+**Status:** not started · **Raised:** 2026-10-23 (v0.1.0 release prep)
+
+**Problem.** D9 limits OwnCI to Linux (including WSL2). v0.1.0 ships `linux/amd64` and `linux/arm64` only; Windows users run the Linux binary inside WSL2. `GOOS=darwin` and `GOOS=windows` builds fail today: `internal/supervisor` has no files for them, and the code relies on Linux-only calls.
+
+**What a port touches**
+- `internal/platform`: `Supported()` and `RunnerArch` (runner assets `osx-x64`, `osx-arm64`, `win-x64`, `win-arm64`), plus the per-asset checksums in `internal/runner/versions.go`.
+- Process control: `syscall.Flock` (`internal/supervisor/lock.go`, fine on darwin, absent on Windows), `Setpgid`/`Setsid` and process-group `Kill` (`internal/supervisor`, `internal/cli/start.go`), the orphan scan (`internal/supervisor/orphans.go`, which reads `/proc`), and the `TCGETS` TTY check (`internal/cli/uninstall.go`, use `TIOCGETA` on darwin).
+- Runner scripts: `run.sh`/`config.sh` work on macOS. Windows uses `run.cmd`/`config.cmd` and a different `.env`/hook model (PowerShell hooks).
+- Docker Desktop for Mac: bind mounts go through a VM file share (path and uid mapping differ), and the socket path is not `/var/run/docker.sock` by default. The cleanup hook, the same-path mounts in container-runner mode (D13) and the uid mapping all need re-checking.
+- `install.sh` and `tools/release.sh` (new targets, `.zip` for Windows), README, D9.
+
+**Order.** macOS first (closest to Linux: POSIX process model, same runner scripts). Native Windows only if there is demand that WSL2 does not cover.
