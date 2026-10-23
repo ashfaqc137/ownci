@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
+import { href } from '../lib/paths'
 
 const enforced = [
   ['Container jobs only.', 'In host mode the runner is configured to reject any job without a container: line. If OwnCI can’t establish this, it refuses to start the runner.'],
@@ -85,7 +86,7 @@ const limits = [
     <section class="cta-band">
       <span class="cta-spark" aria-hidden="true">◉</span>
       <div><p class="section-kicker">Comfortable with the model?</p><h2>Set up your first runner.</h2><p>Start with <code>ownci doctor</code>; it checks isolation too.</p></div>
-      <a class="button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
+      <a class="button-primary" href={href('/docs/')}>Get started <span aria-hidden="true">→</span></a>
     </section>
   </main>
 </BaseLayout>

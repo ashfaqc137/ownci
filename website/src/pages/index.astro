@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
 import Code from '../components/Code.astro'
+import { href } from '../lib/paths'
 
 const workflow = `
 jobs:
@@ -27,8 +28,8 @@ jobs:
         machine does the work, and every job runs inside a Docker container.
       </p>
       <div class="hero-actions">
-        <a class="button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
-        <a class="button-secondary" href="/how-it-works/">See how it works</a>
+        <a class="button-primary" href={href('/docs/')}>Get started <span aria-hidden="true">→</span></a>
+        <a class="button-secondary" href={href('/how-it-works/')}>See how it works</a>
       </div>
 
       <div class="run-demo" role="img" aria-label="Illustration: a pull request check is queued on GitHub, runs on your machine in a container, and passes; the workspace is then wiped.">
@@ -170,8 +171,8 @@ jobs:
         </p>
         <Code label="workflow.yml" code={workflow} />
         <p>
-          Workflows without a <code>container:</code> line can run unchanged in <a href="/docs/workflows/">container-runner mode</a>, and a team can share one workflow
-          so everyone’s jobs <a href="/docs/workflows/#team">run on their own machine</a>.
+          Workflows without a <code>container:</code> line can run unchanged in <a href={href('/docs/workflows/')}>container-runner mode</a>, and a team can share one workflow
+          so everyone’s jobs <a href={href('/docs/workflows/#team')}>run on their own machine</a>.
         </p>
       </div>
     </section>
@@ -188,13 +189,13 @@ jobs:
         <li><span class="mark no" aria-hidden="true">!</span><span><strong>Public repositories are refused by default</strong>, because pull requests from forks could run code on your machine.</span></li>
         <li><span class="mark no" aria-hidden="true">!</span><span><strong>Early days:</strong> Linux and WSL2 only, one job at a time per runner, and no auto-start on boot yet.</span></li>
       </ul>
-      <p class="callout warn"><strong>Read the trust model before you point OwnCI at anything you don’t control.</strong> <a href="/security/">What OwnCI enforces, and what it doesn’t →</a></p>
+      <p class="callout warn"><strong>Read the trust model before you point OwnCI at anything you don’t control.</strong> <a href={href('/security/')}>What OwnCI enforces, and what it doesn’t →</a></p>
     </section>
 
     <section class="cta-band">
       <span class="cta-spark" aria-hidden="true">◉</span>
       <div><p class="section-kicker">Ready when you are</p><h2>Run your next PR check on your own machine.</h2><p>Install, run <code>ownci doctor</code>, and set up your repository.</p></div>
-      <a class="button-primary" href="/docs/">Get started <span aria-hidden="true">→</span></a>
+      <a class="button-primary" href={href('/docs/')}>Get started <span aria-hidden="true">→</span></a>
     </section>
   </main>
 </BaseLayout>
