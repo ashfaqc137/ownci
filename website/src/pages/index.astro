@@ -3,6 +3,10 @@ import BaseLayout from '../layouts/BaseLayout.astro'
 import Code from '../components/Code.astro'
 import { href } from '../lib/paths'
 
+const install = `
+curl -fsSL https://sparshlabs.com/ownci/install.sh | sh
+`
+
 const workflow = `
 jobs:
   build:
@@ -30,6 +34,9 @@ jobs:
       <div class="hero-actions">
         <a class="button-primary" href={href('/docs/')}>Get started <span aria-hidden="true">→</span></a>
         <a class="button-secondary" href={href('/how-it-works/')}>See how it works</a>
+      </div>
+      <div class="hero-install">
+        <Code label="Install · Linux and WSL2" code={install} />
       </div>
 
       <div class="run-demo" role="img" aria-label="Illustration: a pull request check is queued on GitHub, runs on your machine in a container, and passes; the workspace is then wiped.">

@@ -32,7 +32,7 @@ half-created release first (`gh release delete v0.1.0`).
 ## After publishing
 
 ```bash
-curl -fsSL https://github.com/ashfaqc137/ownci/releases/latest/download/install.sh | sh
+curl -fsSL https://sparshlabs.com/ownci/install.sh | sh   # or the copy attached to the release
 ownci version                 # ownci v0.1.0 (commit …, built …), and no "build: dev" line
 ownci doctor
 gh release download v0.1.0 -p '*linux_amd64.tar.gz' -D /tmp/ownci-rel
@@ -42,6 +42,13 @@ gh attestation verify /tmp/ownci-rel/ownci_v0.1.0_linux_amd64.tar.gz --repo ashf
 Before announcing a release with code changes, run the real-GitHub runbook ([`e2e.md`](e2e.md))
 with the release binary and record it in [`acceptance.md`](acceptance.md). A platform is not
 "supported" until its acceptance criteria pass.
+
+## The site's install.sh
+
+`https://sparshlabs.com/ownci/install.sh` is served by the website (`website/`), which copies the repo's
+`install.sh` into its build (`npm run sync-installer`; the copy is gitignored). The site builds from `main`,
+while the binaries come from the latest GitHub release, so `install.sh` must keep working with released
+archive names (`ownci_<tag>_linux_<arch>.tar.gz`) and `SHA256SUMS`. Publish the release first, then deploy the site.
 
 ## Local build (dry run)
 

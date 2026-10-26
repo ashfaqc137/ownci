@@ -9,6 +9,9 @@
     "node": ">=22"
   },
   "scripts": {
+    "sync-installer": "mkdir -p public && cp ../install.sh public/install.sh",
+    "predev": "npm run sync-installer",
+    "prebuild": "npm run sync-installer",
     "dev": "astro dev",
     "build": "astro check && astro build && cp _headers dist/",
     "preview": "astro preview",

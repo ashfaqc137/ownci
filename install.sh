@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the OwnCI CLI from a GitHub release:
 #
-#   curl -fsSL https://github.com/ashfaqc137/ownci/releases/latest/download/install.sh | sh
+#   curl -fsSL https://sparshlabs.com/ownci/install.sh | sh
 #
 # Linux (including WSL2) on amd64 or arm64 only. The archive is checked against
 # the release's SHA256SUMS before anything is installed.
