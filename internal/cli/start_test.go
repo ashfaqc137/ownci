@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -72,9 +74,16 @@ func useChildBinary(t *testing.T) {
 	t.Cleanup(func() { executablePath = old })
 }
 
+// stopRunner is registered with t.Cleanup. t.Context() is already cancelled by
+// then, so it must not be passed to Stop: Stop would give up waiting for the
+// supervisor to exit, and the TempDir cleanup would race its last writes.
 func stopRunner(t *testing.T, p config.Paths) {
 	t.Helper()
-	_ = supervisor.Stop(t.Context(), p, testRunner, supervisor.StopOptions{Timeout: 10 * time.Second, Force: true})
+	ctx := context.WithoutCancel(t.Context())
+	err := supervisor.Stop(ctx, p, testRunner, supervisor.StopOptions{Timeout: 10 * time.Second, Force: true})
+	if err != nil && !errors.Is(err, supervisor.ErrNotRunning) {
+		t.Errorf("stopping the runner: %v", err)
+	}
 }
 
 func TestStartPreconditions(t *testing.T) {
