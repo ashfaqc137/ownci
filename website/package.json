@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro check && astro build",
+    "build": "astro check && astro build && cp _headers dist/",
     "preview": "astro preview",
     "typecheck": "astro check"
   },

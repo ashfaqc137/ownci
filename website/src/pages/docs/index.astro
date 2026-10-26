@@ -1,6 +1,11 @@
 ---
 import DocsShell from '../../components/DocsShell.astro'
 import Code from '../../components/Code.astro'
+import { href } from '../../lib/paths'
+
+const installScript = `
+curl -fsSL https://github.com/ashfaqc137/ownci/releases/latest/download/install.sh | sh
+`
 
 const installRelease = `
 sha256sum -c --ignore-missing SHA256SUMS        # must print: ownci_<version>_linux_<arch>.tar.gz: OK
@@ -65,11 +70,20 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
   <section class="docs-section" id="install">
     <p class="section-kicker">Step 2</p>
     <h2>Install</h2>
-    <h3>From a release</h3>
+    <h3>With the install script</h3>
+    <Code label="shell" code={installScript} />
+    <p>
+      The script downloads the latest release for your architecture, checks it against the release's <code>SHA256SUMS</code> and installs <code>ownci</code> into <code>~/.local/bin</code>.
+      <code>OWNCI_VERSION</code> pins a version and <code>OWNCI_INSTALL_DIR</code> picks another directory, e.g. <code>… | OWNCI_VERSION=v0.1.0 sh</code>.
+    </p>
+    <h3>From a release, by hand</h3>
     <p>
       Download the archive for your architecture and <code>SHA256SUMS</code> from the <a href="https://github.com/ashfaqc137/ownci/releases" rel="noreferrer">Releases page</a>, then verify and install it:
     </p>
     <Code label="shell" code={installRelease} />
+    <p>
+      Each archive carries a GitHub build-provenance attestation: <code>gh attestation verify ownci_&lt;version&gt;_linux_&lt;arch&gt;.tar.gz --repo ashfaqc137/ownci</code>.
+    </p>
     <h3>From source</h3>
     <p>With Go installed (see <code>go.mod</code> for the version), build the release configuration yourself:</p>
     <Code label="shell" code={installSource} />
@@ -95,7 +109,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <p>In host mode (the default), <strong>both lines are required</strong>:</p>
     <Code label=".github/workflows/ci.yml" code={workflow} />
     <p>
-      Open a pull request and watch the check run on your machine. For workflows without a <code>container:</code> line, see <a href="/docs/workflows/">container-runner mode</a>.
+      Open a pull request and watch the check run on your machine. For workflows without a <code>container:</code> line, see <a href={href('/docs/workflows/')}>container-runner mode</a>.
     </p>
   </section>
 
@@ -105,7 +119,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <Code label="shell" code={stopping} />
     <p>
       <code>ownci uninstall</code> without flags only stops the runner and explains what is left.
-      See <a href="/docs/commands/">all commands</a>.
+      See <a href={href('/docs/commands/')}>all commands</a>.
     </p>
   </section>
 </DocsShell>

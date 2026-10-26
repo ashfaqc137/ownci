@@ -1,10 +1,8 @@
 {
   "name": "ownci",
-  // Fully static site (astro.config.mjs has no server adapter): no `main` worker script,
-  // only static assets. public/_headers sets the security headers. See README.md "Deployment".
+  // Static assets only. Served at sparshlabs.com/ownci/; the pages live in dist/ownci/ so the
+  // request path maps straight onto the assets directory.
   "compatibility_date": "2026-10-08",
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "404-page"
-  }
+  "assets": { "directory": "./dist", "not_found_handling": "404-page" },
+  "routes": [{ "pattern": "sparshlabs.com/ownci*", "zone_name": "sparshlabs.com" }]
 }

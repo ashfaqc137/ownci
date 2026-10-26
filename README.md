@@ -60,7 +60,15 @@ Run `ownci doctor` to check all of this.
 
 ## Install
 
-Download the archive for your architecture and `SHA256SUMS` from the
+```bash
+curl -fsSL https://github.com/ashfaqc137/ownci/releases/latest/download/install.sh | sh
+```
+
+The script (Linux and WSL2, amd64 and arm64) downloads the latest release, checks it against
+the release's `SHA256SUMS` and installs `ownci` into `~/.local/bin`. `OWNCI_VERSION` pins a
+version and `OWNCI_INSTALL_DIR` picks another directory, e.g. `… | OWNCI_VERSION=v0.1.0 sh`.
+
+Or by hand: download the archive for your architecture and `SHA256SUMS` from the
 [Releases page](https://github.com/ashfaqc137/ownci/releases), then:
 
 ```bash
@@ -69,6 +77,9 @@ tar -xzf ownci_<version>_linux_<arch>.tar.gz
 install -m 0755 ownci ~/.local/bin/ownci        # make sure ~/.local/bin is on your PATH
 ownci version
 ```
+
+Each archive carries a GitHub build-provenance attestation:
+`gh attestation verify ownci_<version>_linux_<arch>.tar.gz --repo ashfaqc137/ownci`.
 
 Data lives in `~/.local/share/ownci` by default (`--data-dir`, `$OWNCI_DATA_DIR` or
 `$XDG_DATA_HOME/ownci` override it). On WSL keep it on the Linux filesystem, not under `/mnt/c`.
