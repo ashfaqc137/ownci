@@ -61,7 +61,7 @@ Run `ownci doctor` to check all of this.
 ## Install
 
 ```bash
-curl -fsSL https://github.com/ashfaqc137/ownci/releases/latest/download/install.sh | sh
+curl -fsSL https://sparshlabs.com/ownci/install.sh | sh
 ```
 
 The script (Linux and WSL2, amd64 and arm64) downloads the latest release, checks it against

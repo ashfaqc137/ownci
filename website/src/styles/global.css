@@ -106,3 +106,6 @@
   .cmd-strip { grid-template-columns: 1fr; }
   .terminal-body { font-size: 11px; }
 }
+
+.hero-install { max-width: 640px; margin: 26px auto 0; text-align: left; }
+.hero-install .code-block { margin: 0; }
