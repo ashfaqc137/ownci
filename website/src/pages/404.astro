@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
+import { href } from '../lib/paths'
 ---
 
 <BaseLayout title="Page not found · OwnCI">
@@ -9,8 +10,8 @@ import BaseLayout from '../layouts/BaseLayout.astro'
       <h1>This job found<br /><span>no matching runner.</span></h1>
       <p class="lead">The page you were looking for doesn’t exist.</p>
       <div class="hero-actions">
-        <a class="button-primary" href="/">Back home <span aria-hidden="true">→</span></a>
-        <a class="button-secondary" href="/docs/">Docs</a>
+        <a class="button-primary" href={href('/')}>Back home <span aria-hidden="true">→</span></a>
+        <a class="button-secondary" href={href('/docs/')}>Docs</a>
       </div>
     </section>
   </main>

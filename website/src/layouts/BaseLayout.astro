@@ -4,7 +4,9 @@ import '@fontsource/dm-sans/700.css'
 import '@fontsource/manrope/600.css'
 import '@fontsource/manrope/700.css'
 import '@fontsource/dm-mono/400.css'
+import '../styles/sparshlabs.css'
 import '../styles/global.css'
+import { href, routePath } from '../lib/paths'
 
 interface Props {
   title: string
@@ -16,12 +18,12 @@ const {
   description = 'OwnCI turns your Linux machine into a GitHub Actions runner for your repository, with every job in a Docker container.',
 } = Astro.props
 
-const path = Astro.url.pathname
+const path = routePath(Astro.url)
 const nav = [
-  { href: '/', label: 'Why OwnCI', current: path === '/' },
-  { href: '/how-it-works/', label: 'How it works', current: path.startsWith('/how-it-works') },
-  { href: '/security/', label: 'Security', current: path.startsWith('/security') },
-  { href: '/docs/', label: 'Docs', current: path.startsWith('/docs') },
+  { href: href('/'), label: 'Why OwnCI', current: path === '/' },
+  { href: href('/how-it-works/'), label: 'How it works', current: path.startsWith('/how-it-works') },
+  { href: href('/security/'), label: 'Security', current: path.startsWith('/security') },
+  { href: href('/docs/'), label: 'Docs', current: path.startsWith('/docs') },
 ]
 const repo = 'https://github.com/ashfaqc137/ownci'
 ---
@@ -34,15 +36,20 @@ const repo = 'https://github.com/ashfaqc137/ownci'
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta name="theme-color" content="#11120f" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href={href('/favicon.svg')} />
+    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="brand" href="/" aria-label="OwnCI home">
-        <span class="brand-mark" aria-hidden="true"><i></i></span>
-        <span>OwnCI</span>
-      </a>
+      <div class="brand">
+        <a class="brand-lab" href="/">sparshlabs</a>
+        <span class="brand-sep" aria-hidden="true">/</span>
+        <a class="brand-home" href={href('/')} aria-label="OwnCI home">
+          <span class="brand-mark" aria-hidden="true"><i></i></span>
+          <span>OwnCI</span>
+        </a>
+      </div>
       <nav class="site-nav" aria-label="Main navigation">
         {nav.map((item) => (
           <a href={item.href} aria-current={item.current ? 'page' : undefined}>{item.label}</a>
@@ -55,9 +62,13 @@ const repo = 'https://github.com/ashfaqc137/ownci'
     </header>
     <slot />
     <footer class="site-footer">
-      <a href="/" class="footer-brand">OwnCI <span>·</span> Your PR. Your Compute.</a>
+      <a href={href('/')} class="footer-brand">OwnCI <span>·</span> Your PR. Your Compute.</a>
       <span>MIT licensed · Linux &amp; WSL2</span>
-      <a href={repo} rel="noreferrer">Source on GitHub</a>
+      <span class="footer-links">
+        <a href="/">A sparshlabs project</a>
+        <span aria-hidden="true">·</span>
+        <a href={repo} rel="noreferrer">Source on GitHub</a>
+      </span>
     </footer>
   </body>
 </html>

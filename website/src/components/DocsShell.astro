@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
+import { href, routePath } from '../lib/paths'
 
 interface Props {
   title: string
@@ -7,7 +8,7 @@ interface Props {
 }
 
 const { title, description } = Astro.props
-const currentPath = Astro.url.pathname
+const currentPath = routePath(Astro.url)
 const groups = [
   {
     label: 'START HERE',
@@ -40,7 +41,7 @@ const groups = [
           <div class="docs-nav-group">
             <p>{group.label}</p>
             {group.links.map((link) => (
-              <a href={link.href} aria-current={currentPath === link.href ? 'page' : undefined}>
+              <a href={href(link.href)} aria-current={currentPath === link.href ? 'page' : undefined}>
                 {link.label}
               </a>
             ))}

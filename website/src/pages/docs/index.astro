@@ -1,6 +1,7 @@
 ---
 import DocsShell from '../../components/DocsShell.astro'
 import Code from '../../components/Code.astro'
+import { href } from '../../lib/paths'
 
 const installScript = `
 curl -fsSL https://github.com/ashfaqc137/ownci/releases/latest/download/install.sh | sh
@@ -108,7 +109,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <p>In host mode (the default), <strong>both lines are required</strong>:</p>
     <Code label=".github/workflows/ci.yml" code={workflow} />
     <p>
-      Open a pull request and watch the check run on your machine. For workflows without a <code>container:</code> line, see <a href="/docs/workflows/">container-runner mode</a>.
+      Open a pull request and watch the check run on your machine. For workflows without a <code>container:</code> line, see <a href={href('/docs/workflows/')}>container-runner mode</a>.
     </p>
   </section>
 
@@ -118,7 +119,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <Code label="shell" code={stopping} />
     <p>
       <code>ownci uninstall</code> without flags only stops the runner and explains what is left.
-      See <a href="/docs/commands/">all commands</a>.
+      See <a href={href('/docs/commands/')}>all commands</a>.
     </p>
   </section>
 </DocsShell>

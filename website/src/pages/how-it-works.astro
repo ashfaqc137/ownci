@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro'
 import Code from '../components/Code.astro'
+import { href } from '../lib/paths'
 
 const hostMode = `
 jobs:
@@ -120,7 +121,7 @@ jobs:
       </div>
       <p class="callout">
         Switch with <code>ownci setup --repo owner/name --mode container-runner</code>. The default
-        image is the official <code>ghcr.io/actions/actions-runner</code>, pinned by digest. <a href="/docs/workflows/">Details in the docs →</a>
+        image is the official <code>ghcr.io/actions/actions-runner</code>, pinned by digest. <a href={href('/docs/workflows/')}>Details in the docs →</a>
       </p>
     </section>
 
@@ -146,7 +147,7 @@ jobs:
     <section class="cta-band">
       <span class="cta-spark" aria-hidden="true">◉</span>
       <div><p class="section-kicker">Next</p><h2>Know exactly what a container does and doesn’t protect.</h2><p>Read the trust model before you set up your first runner.</p></div>
-      <a class="button-primary" href="/security/">Security <span aria-hidden="true">→</span></a>
+      <a class="button-primary" href={href('/security/')}>Security <span aria-hidden="true">→</span></a>
     </section>
   </main>
 </BaseLayout>
