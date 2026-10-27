@@ -3,21 +3,14 @@ package cli
 import (
 	"errors"
 	"os"
-	"syscall"
-	"unsafe"
 
 	"github.com/ashfaqc137/ownci/internal/github"
 	"github.com/ashfaqc137/ownci/internal/uninstall"
 	"github.com/spf13/cobra"
 )
 
-// stdinIsTerminal is a test seam: uninstall only prompts on a terminal. (A
-// character-device check would also accept /dev/null, so ask the tty driver.)
-var stdinIsTerminal = func() bool {
-	var t syscall.Termios
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, os.Stdin.Fd(), syscall.TCGETS, uintptr(unsafe.Pointer(&t)))
-	return errno == 0
-}
+// stdinIsTerminal is a test seam: uninstall only prompts on a terminal.
+var stdinIsTerminal = func() bool { return isTerminal(os.Stdin) }
 
 func newUninstallCmd() *cobra.Command {
 	var o uninstall.Options

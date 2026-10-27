@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/ashfaqc137/ownci/internal/progress"
 )
 
 func sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -38,10 +40,10 @@ func TestFetchDownloadsAndVerifies(t *testing.T) {
 	payload := []byte("pretend archive")
 	srv, n := server(t, payload)
 	dir := t.TempDir()
-	var progress bytes.Buffer
+	var out bytes.Buffer
 	opts := FetchOptions{
 		Asset:    Asset{URL: srv.URL + "/actions-runner-test.tar.gz", SHA256: sum(payload)},
-		CacheDir: dir, Progress: &progress,
+		CacheDir: dir, Progress: progress.New(&out, false),
 	}
 	path, err := Fetch(context.Background(), opts)
 	if err != nil {
@@ -50,8 +52,8 @@ func TestFetchDownloadsAndVerifies(t *testing.T) {
 	if got, _ := os.ReadFile(path); !bytes.Equal(got, payload) {
 		t.Errorf("content = %q", got)
 	}
-	if filepath.Base(path) != "actions-runner-test.tar.gz" || !strings.Contains(progress.String(), "done") {
-		t.Errorf("path %s, progress %q", path, progress.String())
+	if filepath.Base(path) != "actions-runner-test.tar.gz" || !strings.Contains(out.String(), "done") {
+		t.Errorf("path %s, progress %q", path, out.String())
 	}
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %04o", fi.Mode().Perm())

@@ -23,6 +23,7 @@ import (
 	"github.com/ashfaqc137/ownci/internal/hooks"
 	"github.com/ashfaqc137/ownci/internal/isolation"
 	"github.com/ashfaqc137/ownci/internal/platform"
+	"github.com/ashfaqc137/ownci/internal/progress"
 	"github.com/ashfaqc137/ownci/internal/runner"
 	"github.com/ashfaqc137/ownci/internal/runnercontainer"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
@@ -81,6 +82,7 @@ type Deps struct {
 	APIBaseURL string // GitHub REST base
 	WebBaseURL string // github.com base, used for the runner's --url
 	Now        func() time.Time
+	Progress   *progress.Printer // nil = plain progress lines on Out
 }
 
 type run struct {
@@ -91,6 +93,7 @@ type run struct {
 	dir   string
 	mode  string
 	image string // runner image, container-runner mode only
+	prog  *progress.Printer
 }
 
 // Run executes the setup flow. See tasks/t06-setup.md for the step list; the
@@ -118,7 +121,11 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	if name == "" {
 		name = runner.DefaultName(d.Hostname)
 	}
-	r := &run{d: d, o: o, repo: repo, name: name}
+	r := &run{d: d, o: o, repo: repo, name: name, prog: d.Progress}
+	if r.prog == nil {
+		r.prog = progress.New(d.Out, false)
+	}
+	defer r.prog.End()
 
 	// 1. Preflight (no network).
 	if err := r.preflight(ctx); err != nil {
@@ -181,6 +188,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		}
 	}
 	// 7. Registration token (single-use, short-lived).
+	r.prog.Step("Registering the runner with GitHub")
 	reg, err := gh.RegistrationToken(ctx, repo)
 	if err != nil {
 		return err
@@ -205,6 +213,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		return err
 	}
 	// 10. Isolation: .env enforcement, cleanup hook and images.
+	r.prog.Step("Installing the isolation settings and cleanup hook")
 	if err := installIsolation(ctx, d, r.dir, repo.String(), r.policy()); err != nil {
 		return err
 	}
@@ -229,6 +238,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		}
 	}
 	// 12. Next steps.
+	r.prog.End()
 	fmt.Fprintf(d.Out, "✓ OwnCI is set up for %s as runner '%s' (labels: %s, mode: %s)\n", repo, r.name, strings.Join(allLabels, ","), r.mode)
 	if r.mode == config.ModeContainerRunner {
 		fmt.Fprintf(d.Out, "Next:\n  1. Start contributing compute:   ownci start\n"+
@@ -282,8 +292,13 @@ func (r *run) policy() isolation.Policy {
 	return p
 }
 
-func (r *run) ok(format string, a ...any) { fmt.Fprintf(r.d.Out, "✓ "+format+"\n", a...) }
+func (r *run) ok(format string, a ...any) {
+	r.prog.End()
+	fmt.Fprintf(r.d.Out, "✓ "+format+"\n", a...)
+}
+
 func (r *run) warn(format string, a ...any) {
+	r.prog.End()
 	fmt.Fprintf(r.d.Err, "Warning: "+format+"\n", a...)
 }
 
@@ -459,7 +474,7 @@ func (r *run) install(ctx context.Context, reuse bool, prev *config.RunnerConfig
 	_, statErr := os.Lstat(r.dir)
 	res, err := runner.Install(ctx, runner.InstallOptions{
 		Paths: d.Paths, Name: r.name, Asset: asset, Exec: d.Exec, HTTP: d.HTTP,
-		Force: statErr == nil, Progress: d.Out, Logger: d.Logger,
+		Force: statErr == nil, Progress: r.prog, Logger: d.Logger,
 	})
 	if err != nil {
 		return "", err
@@ -487,6 +502,7 @@ func (r *run) prepareImage(ctx context.Context) error {
 			Hint: "Choose another --name for this runner (an existing setup needs 'ownci uninstall --unregister' first).",
 		}
 	}
+	r.prog.Step(fmt.Sprintf("Preparing the runner image %s (the first pull can take several minutes)", r.image))
 	if _, err := docker.EnsureImage(ctx, r.d.Exec, r.image); err != nil {
 		return &Error{Msg: err.Error(), Hint: hintOr(err, "Check the image name and your network."), Err: err}
 	}

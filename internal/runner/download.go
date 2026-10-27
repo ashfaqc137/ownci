@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ashfaqc137/ownci/internal/progress"
 )
 
 // ErrChecksumMismatch means a downloaded archive did not match its pinned SHA256.
@@ -23,7 +25,7 @@ type FetchOptions struct {
 	Asset    Asset
 	CacheDir string
 	HTTP     *http.Client
-	Progress io.Writer
+	Progress *progress.Printer
 	Logger   *slog.Logger
 }
 
@@ -88,27 +90,18 @@ func Fetch(ctx context.Context, o FetchOptions) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("creating %s: %w", partial, err)
 	}
-	committed, progressOpen := false, false
+	tr := o.Progress.Download(o.Asset.fileName(), resp.ContentLength)
+	committed := false
 	defer func() {
 		f.Close()
 		if !committed {
 			os.Remove(partial)
-			if progressOpen {
-				fmt.Fprintln(o.Progress, "failed")
-			}
+			tr.Finish(false)
 		}
 	}()
 
-	if o.Progress != nil {
-		progressOpen = true
-		if resp.ContentLength > 0 {
-			fmt.Fprintf(o.Progress, "Downloading %s (%.0f MB)… ", o.Asset.fileName(), float64(resp.ContentLength)/(1<<20))
-		} else {
-			fmt.Fprintf(o.Progress, "Downloading %s… ", o.Asset.fileName())
-		}
-	}
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
+	if _, err := io.Copy(io.MultiWriter(f, h, tr), resp.Body); err != nil {
 		return "", fmt.Errorf("downloading %s: %w", o.Asset.URL, err)
 	}
 	if err := f.Sync(); err != nil {
@@ -128,9 +121,7 @@ func Fetch(ctx context.Context, o FetchOptions) (string, error) {
 		return "", fmt.Errorf("moving archive into place: %w", err)
 	}
 	committed = true
-	if o.Progress != nil {
-		fmt.Fprintln(o.Progress, "done")
-	}
+	tr.Finish(true)
 	return path, nil
 }
 

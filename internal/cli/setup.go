@@ -83,6 +83,7 @@ func runSetup(cmd *cobra.Command, o setup.Options) error {
 		AssetFor:   assetFor,
 		APIBaseURL: github.APIBaseURL(),
 		WebBaseURL: github.WebBaseURL(),
+		Progress:   newProgress(app.Out),
 	}, o)
 	var se *setup.Error
 	if errors.As(err, &se) && se.Usage {
@@ -111,7 +112,7 @@ func runDownloadOnly(cmd *cobra.Command, name string, force bool) error {
 		Exec:     newExecRunner(app.Logger),
 		HTTP:     newHTTPClient(),
 		Force:    force,
-		Progress: app.Out,
+		Progress: newProgress(app.Out),
 		Logger:   app.Logger,
 	})
 	if err != nil {

@@ -244,6 +244,9 @@ func TestHappyPath(t *testing.T) {
 		"✓ Runner registered on GitHub (id ",
 		"✓ OwnCI is set up for me/demo as runner 'ownci-box' (labels: ownci, mode: host)",
 		"ownci start", "runs-on: [ownci]", "jobs without 'container:' will be rejected",
+		// Progress, plain because the output is not a terminal.
+		"Downloading runner.tar.gz… done\n", "Extracting the runner…\n",
+		"Registering the runner with GitHub…\n", "Installing the isolation settings and cleanup hook…\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out)

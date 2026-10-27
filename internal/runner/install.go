@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/execx"
+	"github.com/ashfaqc137/ownci/internal/progress"
 )
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -65,7 +65,7 @@ type InstallOptions struct {
 	Exec     execx.Runner
 	HTTP     *http.Client
 	Force    bool
-	Progress io.Writer
+	Progress *progress.Printer
 	Logger   *slog.Logger
 }
 
@@ -96,6 +96,8 @@ func Install(ctx context.Context, o InstallOptions) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, err
 	}
+	o.Progress.Step("Extracting the runner")
+	defer o.Progress.End()
 	if exists {
 		if err := os.RemoveAll(dir); err != nil {
 			return InstallResult{}, fmt.Errorf("removing existing runner dir: %w", err)
