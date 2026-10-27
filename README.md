@@ -67,6 +67,7 @@ curl -fsSL https://sparshlabs.com/ownci/install.sh | sh
 The script (Linux and WSL2, amd64 and arm64) downloads the latest release, checks it against
 the release's `SHA256SUMS` and installs `ownci` into `~/.local/bin`. `OWNCI_VERSION` pins a
 version and `OWNCI_INSTALL_DIR` picks another directory, e.g. `… | OWNCI_VERSION=v0.1.0 sh`.
+To remove OwnCI again: `ownci uninstall --unregister --purge`, then `rm ~/.local/bin/ownci`.
 
 Or by hand: download the archive for your architecture and `SHA256SUMS` from the
 [Releases page](https://github.com/ashfaqc137/ownci/releases), then:
@@ -218,7 +219,7 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
 | `ownci stop [--force]` | Gracefully stops the runner (a running job is cancelled); registration and files are kept. `--timeout` (default 45 s). |
 | `ownci status [--remote] [--json]` | What is *actually* true: installed, registered, mode (and the runner container's state), process (from a held lock, never from files), runner state, last job, isolation, Docker, last error. `--remote` also asks GitHub. |
 | `ownci logs [--source runner\|ownci\|supervisor\|diag] [-n N] [-f]` | Tail OwnCI's and the runner's logs (secrets are redacted). |
-| `ownci uninstall [--unregister] [--purge] [--local-only] [--yes] [--name n]` | Stop the runner; optionally remove the GitHub registration and OwnCI's files. Without flags it only stops and explains what is left. |
+| `ownci uninstall [--unregister] [--purge] [--local-only] [--yes] [--name n]` | Stop the runner; optionally remove the GitHub registration and OwnCI's files. Without flags it only stops and explains what is left. With no runner set up, `--purge` still removes the data directory. The `ownci` binary is never deleted; after a purge the summary prints the `rm` command. |
 
 Global flags: `--data-dir`, `-v/--verbose`.
 

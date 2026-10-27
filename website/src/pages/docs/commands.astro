@@ -9,7 +9,7 @@ const commands = [
   ['ownci stop [--force]', 'Gracefully stop the runner; a running job is cancelled. Registration and files are kept. --timeout defaults to 45 s.'],
   ['ownci status [--remote] [--json]', 'What is actually true: installed, registered, mode, process, runner state, last job, isolation, Docker, last error. --remote also asks GitHub.'],
   ['ownci logs [--source runner|ownci|supervisor|diag] [-n N] [-f]', 'Tail OwnCI’s and the runner’s logs, with secrets redacted.'],
-  ['ownci uninstall [--unregister] [--purge] [--local-only] [--yes] [--name n]', 'Stop the runner and, optionally, remove the GitHub registration and OwnCI’s files. Without flags it only stops and explains what is left.'],
+  ['ownci uninstall [--unregister] [--purge] [--local-only] [--yes] [--name n]', 'Stop the runner and, optionally, remove the GitHub registration and OwnCI’s files. Without flags it only stops and explains what is left. With no runner set up, --purge still removes the data directory. The ownci binary is never deleted; after a purge the summary prints the rm command.'],
 ]
 ---
 

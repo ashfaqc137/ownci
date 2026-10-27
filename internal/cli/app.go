@@ -19,8 +19,10 @@ import (
 // skipAppAnnotation marks commands that must work without a data directory.
 const skipAppAnnotation = "skipApp"
 
-// noLayoutAnnotation marks commands that must not create OwnCI's directory
-// layout inside a non-empty directory that OwnCI did not create.
+// noLayoutAnnotation marks commands that only read or remove: they must not
+// create the data directory when it is missing, nor OwnCI's layout inside a
+// non-empty directory that OwnCI did not create. Otherwise 'ownci status'
+// after 'uninstall --purge' would bring the directory back.
 const noLayoutAnnotation = "noLayout"
 
 // foreignNonEmpty reports whether the root is an existing, non-empty directory
@@ -31,6 +33,12 @@ func foreignNonEmpty(p config.Paths) bool {
 	}
 	entries, err := os.ReadDir(p.Root)
 	return err == nil && len(entries) > 0
+}
+
+// missing reports whether the root does not exist yet.
+func missing(p config.Paths) bool {
+	_, err := os.Lstat(p.Root)
+	return os.IsNotExist(err)
 }
 
 // App is the per-invocation state shared by all commands. It is built in the
@@ -68,9 +76,10 @@ func setupApp(cmd *cobra.Command, f *rootFlags) (*App, io.Closer, error) {
 	}
 
 	paths := config.NewPaths(root)
-	// A command that only removes things must not litter a directory that is
-	// not OwnCI's: skip the layout (and the log file inside it) there.
-	untouched := cmd.Annotations[noLayoutAnnotation] == "true" && foreignNonEmpty(paths)
+	// A command that only reads or removes things must not create a data
+	// directory or litter one that is not OwnCI's: skip the layout (and the
+	// log file inside it) there.
+	untouched := cmd.Annotations[noLayoutAnnotation] == "true" && (missing(paths) || foreignNonEmpty(paths))
 	logFile := paths.OwnciLog
 	var notes []string
 	if untouched {

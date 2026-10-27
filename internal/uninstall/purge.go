@@ -12,6 +12,8 @@ import (
 	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/execx"
 	"github.com/ashfaqc137/ownci/internal/hooks"
+	"github.com/ashfaqc137/ownci/internal/runner"
+	"github.com/ashfaqc137/ownci/internal/supervisor"
 )
 
 // purgeResult records what purge did. Nothing is ever deleted outside the
@@ -83,17 +85,21 @@ func (r *run) purge(ctx context.Context) purgeResult {
 	p := r.d.Paths
 	var res purgeResult
 
-	// The runner directory, with a container for root-owned files in _work.
-	r.removeRunnerDir(ctx, &res)
+	if !r.noRunner {
+		// The runner directory, with a container for root-owned files in _work.
+		r.removeRunnerDir(ctx, &res)
 
-	// Per-runner files.
-	if matches, _ := filepath.Glob(filepath.Join(p.RunDir, r.name+".*")); len(matches) > 0 {
-		for _, m := range matches {
-			r.removeFile(m, &res)
+		// Per-runner files.
+		if matches, _ := filepath.Glob(filepath.Join(p.RunDir, r.name+".*")); len(matches) > 0 {
+			for _, m := range matches {
+				r.removeFile(m, &res)
+			}
 		}
+		r.removeFile(p.RunnerLog(r.name), &res)
+		r.removeFile(filepath.Join(p.LogsDir, "supervisor-"+r.name+".log"), &res)
+	} else {
+		r.removeOrphans(&res)
 	}
-	r.removeFile(p.RunnerLog(r.name), &res)
-	r.removeFile(filepath.Join(p.LogsDir, "supervisor-"+r.name+".log"), &res)
 	if cfg, err := config.Load(p); err != nil || cfg.Runner.Name == r.name {
 		r.removeFile(p.ConfigFile, &res)
 	}
@@ -133,6 +139,39 @@ func (r *run) purge(ctx context.Context) purgeResult {
 		}
 	}
 	return res
+}
+
+// removeOrphans removes the per-runner files of runners whose directory is
+// gone (deleted by hand). Only files of the known naming are touched, and a
+// runner that still holds its lock is left alone.
+func (r *run) removeOrphans(res *purgeResult) {
+	p := r.d.Paths
+	names := map[string]bool{}
+	for _, g := range []struct{ dir, prefix, suffix string }{
+		{p.RunDir, "", ".lock"},
+		{p.RunDir, "", ".pid"},
+		{p.RunDir, "", ".state.json"},
+		{p.LogsDir, "runner-", ".log"},
+		{p.LogsDir, "supervisor-", ".log"},
+	} {
+		matches, _ := filepath.Glob(filepath.Join(g.dir, g.prefix+"*"+g.suffix))
+		for _, m := range matches {
+			name := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), g.prefix), g.suffix)
+			if runner.ValidateName(name) == nil {
+				names[name] = true
+			}
+		}
+	}
+	for name := range names {
+		if running, _, _ := supervisor.IsRunning(p, name); running {
+			res.Hints = append(res.Hints, fmt.Sprintf("runner '%s' is still running although its directory is gone; stop it and run uninstall again", name))
+			continue
+		}
+		for _, f := range []string{p.LockFile(name), p.PidFile(name), p.StateFile(name), p.RunnerLog(name),
+			filepath.Join(p.LogsDir, "supervisor-"+name+".log")} {
+			r.removeFile(f, res)
+		}
+	}
 }
 
 func (r *run) removeRunnerDir(ctx context.Context, res *purgeResult) {

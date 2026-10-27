@@ -59,6 +59,7 @@ type Deps struct {
 	APIBaseURL  string
 	WebBaseURL  string
 	StopTimeout time.Duration // default 45s
+	Executable  string        // path of the ownci binary, for the removal hint; "" = no hint
 }
 
 type run struct {
@@ -70,6 +71,7 @@ type run struct {
 	repo *github.Repo         // nil when it cannot be determined
 
 	registered bool // .runner present: a registration probably exists on GitHub
+	noRunner   bool // nothing is set up: only a purge of the data directory remains
 	sum        summary
 }
 
@@ -93,8 +95,10 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		return err
 	}
 	if !found {
-		fmt.Fprintf(d.Out, "Nothing to uninstall in %s\n", d.Paths.Root)
-		return nil
+		if !r.purgeWithoutRunner() {
+			return nil
+		}
+		r.noRunner = true
 	}
 	// Refuse an unsafe purge before anything irreversible happens.
 	if o.Purge {
@@ -109,13 +113,15 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	}
 
 	// 3. Stop.
-	if err := r.stop(ctx); err != nil {
-		return err
+	if !r.noRunner {
+		if err := r.stop(ctx); err != nil {
+			return err
+		}
 	}
 
 	// 4. Unregister.
 	var unregErr error
-	if o.Unregister {
+	if o.Unregister && !r.noRunner {
 		unregErr = r.unregister(ctx)
 		if unregErr != nil && !o.Purge {
 			r.sum.github = "still registered (unregistering failed)"
@@ -185,6 +191,33 @@ func (r *run) resolve() (bool, error) {
 	return true, nil
 }
 
+// purgeWithoutRunner decides what happens when no runner is set up (ownci was
+// installed, maybe ran doctor or status, but never setup). It reports true
+// when --purge should still remove the data directory, and otherwise says why
+// there is nothing to do.
+func (r *run) purgeWithoutRunner() bool {
+	d, o := r.d, r.o
+	root := d.Paths.Root
+	if _, err := os.Lstat(root); err != nil {
+		fmt.Fprintf(d.Out, "Nothing to uninstall: %s does not exist\n", root)
+		if o.Purge {
+			r.printBinaryHint()
+		}
+		return false
+	}
+	if len(runnerDirs(d.Paths)) > 0 {
+		// --name picked a runner that does not exist; others do.
+		fmt.Fprintf(d.Out, "Nothing to uninstall in %s\n", root)
+		return false
+	}
+	if !o.Purge {
+		fmt.Fprintf(d.Out, "Nothing to uninstall in %s: no runner is set up\n", root)
+		fmt.Fprintln(d.Out, "The data directory is kept; add --purge to delete it.")
+		return false
+	}
+	return true
+}
+
 func (r *run) findRepo() *github.Repo {
 	try := func(s string) *github.Repo {
 		if s == "" {
@@ -220,17 +253,24 @@ func (r *run) settingsURL() string {
 // without --yes it refuses instead of guessing.
 func (r *run) confirm(_ context.Context) error {
 	d, o := r.d, r.o
-	fmt.Fprintf(d.Out, "Uninstall plan for runner '%s':\n", r.name)
-	fmt.Fprintln(d.Out, "  - stop the runner if it is running")
-	switch {
-	case o.Unregister:
-		fmt.Fprintf(d.Out, "  - unregister it from %s on GitHub\n", orUnknown(r.repo))
-	case o.LocalOnly:
-		fmt.Fprintln(d.Out, "  - leave GitHub alone (--local-only)")
-	}
-	if o.Purge {
-		fmt.Fprintf(d.Out, "  - delete OwnCI's files for this runner under %s\n", d.Paths.Root)
+	if r.noRunner {
+		fmt.Fprintln(d.Out, "Uninstall plan (no runner is set up):")
 	} else {
+		fmt.Fprintf(d.Out, "Uninstall plan for runner '%s':\n", r.name)
+		fmt.Fprintln(d.Out, "  - stop the runner if it is running")
+		switch {
+		case o.Unregister:
+			fmt.Fprintf(d.Out, "  - unregister it from %s on GitHub\n", orUnknown(r.repo))
+		case o.LocalOnly:
+			fmt.Fprintln(d.Out, "  - leave GitHub alone (--local-only)")
+		}
+	}
+	switch {
+	case o.Purge && r.noRunner:
+		fmt.Fprintf(d.Out, "  - delete OwnCI's files under %s\n", d.Paths.Root)
+	case o.Purge:
+		fmt.Fprintf(d.Out, "  - delete OwnCI's files for this runner under %s\n", d.Paths.Root)
+	default:
 		fmt.Fprintln(d.Out, "  - keep all files (add --purge to delete them)")
 	}
 	if o.Purge && !o.Unregister && !o.LocalOnly && r.registered {

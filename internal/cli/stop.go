@@ -18,8 +18,9 @@ func newStopCmd() *cobra.Command {
 		force   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "stop",
-		Short: "Stop the runner gracefully, keeping its configuration",
+		Use:         "stop",
+		Annotations: map[string]string{noLayoutAnnotation: "true"},
+		Short:       "Stop the runner gracefully, keeping its configuration",
 		Long: `Stop the runner started by 'ownci start' and wait for it to exit.
 
 The registration and configuration are kept, so 'ownci start' brings the
