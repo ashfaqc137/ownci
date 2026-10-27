@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -453,20 +454,161 @@ func TestUnregisterAndLocalOnlyContradict(t *testing.T) {
 	}
 }
 
-func TestNothingToUninstall(t *testing.T) {
+// withoutRunner turns the env into a data directory where nothing was set up,
+// like one left behind by 'ownci doctor' or 'ownci status'.
+func withoutRunner(t *testing.T, e *env) {
+	t.Helper()
+	for _, p := range []string{e.paths.RunnerDir(rname), e.paths.ConfigFile, e.paths.CacheDir,
+		e.paths.StateFile(rname), e.paths.RunnerLog(rname), filepath.Join(e.paths.LogsDir, "supervisor-"+rname+".log")} {
+		if err := os.RemoveAll(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.d.Executable = "/somewhere/bin/ownci"
+}
+
+func TestNoRunnerWithoutPurgeKeepsTheDataDir(t *testing.T) {
 	e := newEnv(t)
-	if err := os.RemoveAll(e.paths.RunnersDir); err != nil {
+	withoutRunner(t, e)
+	if err := e.run(Options{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	out := e.out.String()
+	if !strings.Contains(out, "Nothing to uninstall in "+e.paths.Root+": no runner is set up") || !strings.Contains(out, "add --purge") {
+		t.Errorf("output: %q", out)
+	}
+	if !exists(e.paths.Marker) || !exists(e.paths.OwnciLog) {
+		t.Error("files were removed without --purge")
+	}
+}
+
+func TestPurgeWithoutRunnerRemovesTheDataDir(t *testing.T) {
+	e := newEnv(t)
+	withoutRunner(t, e)
+	sibling := filepath.Join(e.parent, "keep-me")
+	write(t, sibling, "x")
+	if err := e.run(Options{Purge: true, Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if exists(e.paths.Root) {
+		t.Errorf("data dir remains: %v", entriesOf(e.paths.Root))
+	}
+	if !exists(sibling) {
+		t.Error("a file next to the data dir was removed")
+	}
+	if e.reqs.Load() != 0 {
+		t.Errorf("%d GitHub requests without a runner", e.reqs.Load())
+	}
+	out := e.out.String()
+	for _, want := range []string{"Uninstall plan (no runner is set up)", "removed (" + e.paths.Root + " is gone)", "rm /somewhere/bin/ownci"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPurgeWithoutRunnerRemovesOrphanedRunnerFiles(t *testing.T) {
+	e := newEnv(t)
+	// The runner directory was deleted by hand; its logs and state remain.
+	if err := os.RemoveAll(e.paths.RunnerDir(rname)); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(e.paths.ConfigFile)
-	if err := e.run(Options{Yes: true, Purge: true}); err != nil {
+	if err := e.run(Options{Purge: true, Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if exists(e.paths.Root) {
+		t.Errorf("data dir remains: %s", e.out.String())
+	}
+}
+
+func TestPurgeWithoutRunnerSparesARunnerThatHoldsItsLock(t *testing.T) {
+	e := newEnv(t)
+	if err := os.RemoveAll(e.paths.RunnerDir(rname)); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(e.paths.ConfigFile)
+	lock, err := os.OpenFile(e.paths.LockFile(rname), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run(Options{Purge: true, Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{e.paths.LockFile(rname), e.paths.StateFile(rname), e.paths.RunnerLog(rname), e.paths.Marker} {
+		if !exists(p) {
+			t.Errorf("%s was removed although its runner holds the lock", p)
+		}
+	}
+	if !strings.Contains(e.out.String(), "runner '"+rname+"' is still running") {
+		t.Errorf("summary:\n%s", e.out.String())
+	}
+}
+
+func TestPurgeWithoutRunnerKeepsForeignFiles(t *testing.T) {
+	e := newEnv(t)
+	withoutRunner(t, e)
+	userFile := filepath.Join(e.paths.Root, "my-notes.txt")
+	write(t, userFile, "important")
+	if err := e.run(Options{Purge: true, Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(userFile) || !exists(e.paths.Marker) {
+		t.Error("a user file or the marker was removed")
+	}
+	if exists(e.paths.OwnciLog) {
+		t.Error("OwnCI's own log was not removed")
+	}
+	if !strings.Contains(e.out.String(), "left: "+userFile) {
+		t.Errorf("summary:\n%s", e.out.String())
+	}
+}
+
+func TestPurgeWithoutRunnerRefusesWithoutMarker(t *testing.T) {
+	e := newEnv(t)
+	withoutRunner(t, e)
+	if err := os.Remove(e.paths.Marker); err != nil {
+		t.Fatal(err)
+	}
+	err := e.run(Options{Purge: true, Yes: true})
+	wantErr(t, err, "not an OwnCI data directory", "Nothing was deleted")
+	if !exists(e.paths.OwnciLog) {
+		t.Error("files deleted")
+	}
+}
+
+func TestPurgeOfAMissingRunnerLeavesOthersAlone(t *testing.T) {
+	e := newEnv(t)
+	if err := e.run(Options{Name: "ghost", LocalOnly: true, Purge: true, Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.out.String(); !strings.Contains(got, "Nothing to uninstall in "+e.paths.Root) {
 		t.Errorf("output: %q", got)
 	}
-	if !exists(e.paths.Marker) {
-		t.Error("purge ran although there was nothing to uninstall")
+	if !exists(e.paths.RunnerDir(rname)) || !exists(e.paths.OwnciLog) {
+		t.Error("files of another runner were removed")
+	}
+}
+
+func TestNothingToUninstallWhenTheDataDirIsMissing(t *testing.T) {
+	e := newEnv(t)
+	if err := os.RemoveAll(e.paths.Root); err != nil {
+		t.Fatal(err)
+	}
+	e.d.Executable = "/somewhere/bin/ownci"
+	if err := e.run(Options{Purge: true, Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	out := e.out.String()
+	if !strings.Contains(out, "Nothing to uninstall: "+e.paths.Root+" does not exist") || !strings.Contains(out, "rm /somewhere/bin/ownci") {
+		t.Errorf("output: %q", out)
+	}
+	if exists(e.paths.Root) {
+		t.Error("the data dir was created")
 	}
 }
 
@@ -507,6 +649,7 @@ func TestInvalidNameIsRejected(t *testing.T) {
 func TestPurgeKeepsSharedFilesWhileAnotherRunnerRemains(t *testing.T) {
 	e := newEnv(t)
 	e.install("other")
+	e.d.Executable = "/somewhere/bin/ownci"
 	if err := e.run(Options{LocalOnly: true, Purge: true, Yes: true, Name: rname}); err != nil {
 		t.Fatal(err)
 	}
@@ -523,6 +666,9 @@ func TestPurgeKeepsSharedFilesWhileAnotherRunnerRemains(t *testing.T) {
 	}
 	if !strings.Contains(e.out.String(), "other runners remain") {
 		t.Errorf("summary:\n%s", e.out.String())
+	}
+	if strings.Contains(e.out.String(), "rm /somewhere/bin/ownci") {
+		t.Error("suggests removing the CLI although another runner remains")
 	}
 }
 

@@ -21,8 +21,9 @@ func newLogsCmd() *cobra.Command {
 		follow bool
 	)
 	cmd := &cobra.Command{
-		Use:   "logs",
-		Short: "Show OwnCI and runner logs",
+		Use:         "logs",
+		Annotations: map[string]string{noLayoutAnnotation: "true"},
+		Short:       "Show OwnCI and runner logs",
 		Long: `Show the end of a log file.
 
 Sources:

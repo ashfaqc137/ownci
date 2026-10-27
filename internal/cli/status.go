@@ -112,8 +112,9 @@ func newStatusCmd() *cobra.Command {
 		remote bool
 	)
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show installation, configuration and runner state",
+		Use:         "status",
+		Annotations: map[string]string{noLayoutAnnotation: "true"},
+		Short:       "Show installation, configuration and runner state",
 		Long: `Show the actual local state of the runner.
 
 "running" means a supervisor holds the runner's lock; installed files alone

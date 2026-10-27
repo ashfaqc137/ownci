@@ -46,4 +46,16 @@ func (r *run) printSummary() {
 		fmt.Fprintf(w, "  %-16s kept at %s (use --purge to remove)\n", "Local files", r.d.Paths.Root)
 	}
 	fmt.Fprintf(w, "  %-16s Docker images (busybox cleanup image, the runner image of container-runner mode, job images) — remove with 'docker image prune' if desired\n", "Not touched")
+	if r.o.Purge && !r.sum.files.OthersRemain {
+		r.printBinaryHint()
+	}
+}
+
+// printBinaryHint says how to remove the CLI itself. ownci never deletes its
+// own binary: it may be a dev build or belong to a package manager.
+func (r *run) printBinaryHint() {
+	if r.d.Executable == "" {
+		return
+	}
+	fmt.Fprintf(r.d.Out, "\nTo remove the ownci CLI itself: rm %s\n", r.d.Executable)
 }

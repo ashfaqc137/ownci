@@ -14,7 +14,7 @@ Let the user cleanly stop contributing compute permanently: stop the runner, opt
 Flags: `--unregister`, `--purge`, `--local-only` (mutually exclusive with `--unregister`; explicitly skip GitHub), `--yes` (skip confirmation), `--name` (defaults to the configured name; allows cleaning up a dir whose config.json is missing or broken).
 
 Flow:
-1. Resolve the target: from config.json, or `--name` + an existing `runners/<name>/`. Nothing found → `Nothing to uninstall in <data-dir>`, exit 0.
+1. Resolve the target: from config.json, or `--name` + an existing `runners/<name>/`. Nothing found → `Nothing to uninstall in <data-dir>`, exit 0 — except `--purge` on a marked data dir with no runner dirs at all (installed, never set up): it still purges the shared files, the per-runner files of runners whose directory is gone (unless that runner holds its lock), and the data dir. A missing data dir → `Nothing to uninstall: <data-dir> does not exist`.
 2. **Confirmation** (unless `--yes` or a non-TTY stdin, which requires `--yes` → otherwise a usage error): print the plan (stop / unregister / purge) and ask `Proceed? [y/N]`.
 3. **Stop:** `supervisor.Stop` if running (timeout 45 s, then force). Report it.
 4. **Unregister** (`--unregister`):

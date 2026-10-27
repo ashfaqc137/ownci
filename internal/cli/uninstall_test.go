@@ -131,8 +131,48 @@ func TestUninstallNothingToDo(t *testing.T) {
 	useFake(t, healthyFake())
 	dir := filepath.Join(t.TempDir(), "empty")
 	stdout, _, code := runCLI(t, "--data-dir", dir, "uninstall", "--yes")
-	if code != 0 || !strings.Contains(stdout, "Nothing to uninstall in "+dir) {
+	if code != 0 || !strings.Contains(stdout, "Nothing to uninstall: "+dir+" does not exist") {
 		t.Errorf("exit %d: %s", code, stdout)
+	}
+}
+
+// Commands that only read or remove must not create the data directory, or
+// 'ownci status' after 'uninstall --purge' would bring it back.
+func TestReadOnlyCommandsDoNotCreateTheDataDir(t *testing.T) {
+	useFake(t, healthyFake())
+	dir := filepath.Join(t.TempDir(), "d")
+	for _, args := range [][]string{{"status"}, {"logs"}, {"stop"}, {"uninstall", "--yes"}, {"uninstall", "--purge", "--yes"}} {
+		runCLI(t, append([]string{"--data-dir", dir}, args...)...)
+		if _, err := os.Stat(dir); err == nil {
+			t.Fatalf("%v created %s", args, dir)
+		}
+	}
+}
+
+// Installed, checked with doctor/status, never set up: --purge removes the
+// data directory and says how to remove the binary.
+func TestUninstallPurgeWithoutRunner(t *testing.T) {
+	useFake(t, healthyFake())
+	dir := filepath.Join(t.TempDir(), "d")
+	runCLI(t, "--data-dir", dir, "doctor")
+	if _, err := os.Stat(filepath.Join(dir, ".ownci-data-dir")); err != nil {
+		t.Fatalf("doctor did not create the data dir: %v", err)
+	}
+
+	stdout, _, code := runCLI(t, "--data-dir", dir, "uninstall", "--yes")
+	if code != 0 || !strings.Contains(stdout, "no runner is set up") {
+		t.Errorf("plain: exit %d: %s", code, stdout)
+	}
+	stdout, stderr, code := runCLI(t, "--data-dir", dir, "uninstall", "--purge", "--yes")
+	if code != 0 || !strings.Contains(stdout, "is gone") || !strings.Contains(stdout, "To remove the ownci CLI itself: rm ") {
+		t.Errorf("purge: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if _, err := os.Stat(dir); err == nil {
+		t.Errorf("data dir remains: %v", entriesOf(dir))
+	}
+	runCLI(t, "--data-dir", dir, "status")
+	if _, err := os.Stat(dir); err == nil {
+		t.Error("status recreated the data dir")
 	}
 }
 

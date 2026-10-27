@@ -28,6 +28,7 @@ func newUninstallCmd() *cobra.Command {
 		Long: `Stop the runner and, on request, remove it.
 
 Plain 'ownci uninstall' only stops the runner and explains what is left.
+With no runner set up, --purge still removes the data directory.
   --unregister   also remove the runner's registration from GitHub (needs a token
                  with admin access, like setup)
   --purge        also delete OwnCI's files: the runner directory, its logs and
@@ -36,11 +37,13 @@ Plain 'ownci uninstall' only stops the runner and explains what is left.
                  in a data directory that ownci created (marker file present).
   --local-only   do not touch GitHub at all (for a runner you removed there by hand)
 
-Docker images (the busybox cleanup image, job images) are never removed.`,
+Docker images (the busybox cleanup image, job images) and the ownci binary
+itself are never removed; after a purge the summary says how to delete the binary.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app := appFrom(cmd)
 			home, _ := os.UserHomeDir()
+			exe, _ := os.Executable()
 			err := uninstall.Run(cmd.Context(), uninstall.Deps{
 				Paths:      app.Paths,
 				Exec:       newExecRunner(app.Logger),
@@ -54,6 +57,7 @@ Docker images (the busybox cleanup image, job images) are never removed.`,
 				IsTerminal: stdinIsTerminal,
 				APIBaseURL: apiBaseURL(),
 				WebBaseURL: github.WebBaseURL(),
+				Executable: exe,
 			}, o)
 			var ue *uninstall.Error
 			if errors.As(err, &ue) && ue.Usage {
