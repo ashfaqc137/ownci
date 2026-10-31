@@ -1,8 +1,8 @@
 # OwnCI website
 
 The public site for OwnCI: what problem it solves, how it works, the security model, and the
-docs. Astro, fully static, no client-side JavaScript. Served at
-[sparshlabs.com/ownci/](https://sparshlabs.com/ownci/) as one of the
+docs. Astro, fully static; the only client-side JavaScript is the code blocks' copy button.
+Served at [sparshlabs.com/ownci/](https://sparshlabs.com/ownci/) as one of the
 [sparshlabs](https://github.com/ashfaqc137/sparshlabs) project sites.
 
 ```bash
@@ -22,7 +22,7 @@ Node 22 or newer (see `.nvmrc` and `engines`). Dependencies are pinned to exact 
 | `src/pages/` | `index` (why OwnCI), `how-it-works`, `security`, `docs/*`, `404` |
 | `src/layouts/BaseLayout.astro` | Header, nav, footer, font imports |
 | `src/components/DocsShell.astro` | Docs sidebar layout; add new docs pages to its `groups` |
-| `src/components/Code.astro` | Code block; pass snippets as a string prop (write `${{` as `\${{` in template literals) |
+| `src/components/Code.astro` | Code block with a copy button; pass snippets as a string prop (write `${{` as `\${{` in template literals) |
 | `src/lib/paths.ts` | `href()` and `routePath()`: every internal link goes through `href('/docs/')` so it carries the `/ownci` base |
 | `src/styles/sparshlabs.css` | Shared sparshlabs theme: tokens, header, footer, sections, docs, code. **A synced copy, don't edit it here** |
 | `src/styles/global.css` | OwnCI-only styles (hero visual, compare, flow, command strip), using the theme's tokens |
@@ -54,11 +54,12 @@ model changes, update the matching page in the same pull request.
 
 ## Security headers
 
-`_headers` sets a strict Content-Security-Policy (`default-src 'none'`; styles, fonts and
-images from `'self'` only; no scripts). This works because the site ships no JavaScript and
-`astro.config.mjs` stops Astro from inlining stylesheets or assets. If you add a `<script>`,
-inline `style=""` attributes, or a third-party resource, the CSP will block it; update the policy
-deliberately rather than loosening it to `'unsafe-inline'`.
+`_headers` sets a strict Content-Security-Policy (`default-src 'none'`; scripts, styles, fonts
+and images from `'self'` only). This works because `astro.config.mjs` stops Astro from inlining
+stylesheets, scripts or assets, so the one script (the copy button in `Code.astro`) ships as a
+file under `/_astro/`. Inline scripts, inline `style=""` attributes, or a third-party resource
+will be blocked by the CSP; update the policy deliberately rather than loosening it to
+`'unsafe-inline'`.
 
 ## Deployment (Cloudflare Workers static assets)
 
