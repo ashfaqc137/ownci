@@ -1,12 +1,12 @@
 // Package runnercontainer runs the official runner inside a Docker container
-// (container-runner mode, D13): the `docker run` command line, the entrypoint
+// (container-runner mode): the `docker run` command line, the entrypoint
 // that maps the container user to the host user, and the checks the mode
 // depends on.
 //
 // The runner directory is mounted at the identical path inside the container.
 // The runner hands its own paths (_work, externals, …) to the host Docker
 // daemon as bind-mount sources for job containers, so they must mean the same
-// thing on both sides (tasks/future.md F2).
+// thing on both sides.
 package runnercontainer
 
 import (

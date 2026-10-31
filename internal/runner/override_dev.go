@@ -7,8 +7,8 @@ import (
 	"os"
 )
 
-// devOverride lets a dev build download a runner from OWNCI_DEV_RUNNER_URL
-// (D8). A checksum is mandatory: even dev builds never install unverified
+// devOverride lets a dev build download a runner from OWNCI_DEV_RUNNER_URL.
+// A checksum is mandatory: even dev builds never install unverified
 // downloads.
 func devOverride(arch string) (Asset, bool, error) {
 	url := os.Getenv("OWNCI_DEV_RUNNER_URL")

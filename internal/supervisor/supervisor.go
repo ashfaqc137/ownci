@@ -52,7 +52,7 @@ type Options struct {
 	BeforeLaunch func(ctx context.Context) error
 
 	// Command is the runner's argv; nil runs <runner dir>/run.sh on the host.
-	// Container-runner mode runs `docker run …` (D13).
+	// Container-runner mode runs `docker run …`.
 	Command []string
 	// AfterExit runs after every exit of the runner process (container mode:
 	// remove a container the docker CLI left behind when it was killed).
@@ -150,6 +150,26 @@ type supervisor struct {
 	dir  string
 }
 
+// beforeLaunch runs Options.BeforeLaunch, cancelling it when a stop signal
+// arrives. It reports whether it was interrupted.
+func (s *supervisor) beforeLaunch(ctx context.Context) (interrupted bool, err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done, watched := make(chan struct{}), make(chan bool)
+	go func() {
+		select {
+		case <-s.sigs:
+			cancel()
+			watched <- true
+		case <-done:
+			watched <- false
+		}
+	}()
+	err = s.o.BeforeLaunch(ctx)
+	close(done)
+	return <-watched, err
+}
+
 func (s *supervisor) loop(ctx context.Context) (State, error) {
 	t, o := s.t, s.o
 	var restarts []time.Time
@@ -160,7 +180,14 @@ func (s *supervisor) loop(ctx context.Context) (State, error) {
 			t.notice(fmt.Sprintf("stopped %d leftover runner process(es) from an earlier run: %v", len(pids), pids))
 		}
 		if o.BeforeLaunch != nil {
-			if err := o.BeforeLaunch(ctx); err != nil {
+			interrupted, err := s.beforeLaunch(ctx)
+			if interrupted {
+				// Ctrl-C during an image pull or the cleanup is a stop, not a
+				// crash (the terminal's SIGINT also kills the docker child).
+				t.finish(PhaseStopped, nil, "")
+				return t.snapshot(), nil
+			}
+			if err != nil {
 				t.finish(PhaseCrashed, nil, "preparing to start the runner: "+err.Error())
 				return t.snapshot(), err
 			}

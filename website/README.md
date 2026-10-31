@@ -13,7 +13,7 @@ npm run build      # astro check + static build into dist/ownci/, plus dist/_hea
 npm run preview    # serve the build at http://localhost:4321/ownci/
 ```
 
-Node ≥ 22.23 (see `.nvmrc` and `engines`). Dependencies are pinned to exact versions.
+Node 22 or newer (see `.nvmrc` and `engines`). Dependencies are pinned to exact versions.
 
 ## Layout
 
@@ -22,7 +22,7 @@ Node ≥ 22.23 (see `.nvmrc` and `engines`). Dependencies are pinned to exact ve
 | `src/pages/` | `index` (why OwnCI), `how-it-works`, `security`, `docs/*`, `404` |
 | `src/layouts/BaseLayout.astro` | Header, nav, footer, font imports |
 | `src/components/DocsShell.astro` | Docs sidebar layout; add new docs pages to its `groups` |
-| `src/components/Code.astro` | Code block; pass snippets as a string prop (no escaping needed) |
+| `src/components/Code.astro` | Code block; pass snippets as a string prop (write `${{` as `\${{` in template literals) |
 | `src/lib/paths.ts` | `href()` and `routePath()`: every internal link goes through `href('/docs/')` so it carries the `/ownci` base |
 | `src/styles/sparshlabs.css` | Shared sparshlabs theme: tokens, header, footer, sections, docs, code. **A synced copy, don't edit it here** |
 | `src/styles/global.css` | OwnCI-only styles (hero visual, compare, flow, command strip), using the theme's tokens |

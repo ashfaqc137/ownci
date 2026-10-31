@@ -3,7 +3,7 @@ import DocsShell from '../../components/DocsShell.astro'
 import Code from '../../components/Code.astro'
 
 const crSetup = `
-ownci setup --repo owner/name --mode container-runner    # or: --force --mode container-runner to switch
+ownci setup --repo owner/name --mode container-runner
 ownci start --detach
 `
 
@@ -17,21 +17,40 @@ jobs:
 `
 
 const customImage = `
-docker build -t my/runner:22.04 -f e2e/images/ubuntu22.Dockerfile .
+docker build -t my/runner:22.04 -f e2e/images/ubuntu22.Dockerfile .   # in a clone of the OwnCI repository
 ownci setup --repo owner/name --mode container-runner --image my/runner:22.04
 `
 
 const teamSetup = `
-ownci setup --repo owner/name --labels <your-github-username>   # each developer, once
+ownci setup --repo owner/name --labels dev-<your-github-username>   # each developer, once
 `
 
 const teamWorkflow = `
 jobs:
   build:
-    runs-on: [ownci, "\${{ github.actor }}"]   # the user who opened or pushed to the PR
+    runs-on: [ownci, "dev-\${{ github.actor }}"]   # the user who opened or pushed to the PR
     container: node:22
     steps:
       - uses: actions/checkout@v4
+      - run: npm ci && npm run build
+`
+
+const maintainerWorkflow = `
+# .github/workflows/ci.yml, on main
+on:
+  pull_request_target:
+    branches: [main]
+permissions:
+  contents: read             # pull_request_target can otherwise get a write token
+jobs:
+  build:
+    runs-on: [ownci, "dev-\${{ github.event.pull_request.user.login }}"]   # the PR author's machine
+    container: node:22
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}   # the PR's code, not main's
+          persist-credentials: false
       - run: npm ci && npm run build
 `
 
@@ -45,14 +64,15 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
 
 <DocsShell
   title="Workflows"
-  description="Run workflows without a container: line, share one workflow file across a team, and serve several repositories from one machine."
+  description="Run workflows without a container: line, share one workflow file across a team, let only maintainers decide where jobs run, and serve several repositories from one machine."
 >
   <section class="docs-section" id="container-runner">
     <p class="section-kicker">Container-runner mode</p>
     <h2>Run every job in a container, no <code>container:</code> needed</h2>
     <p>
       Workflows written for GitHub-hosted runners usually have no <code>container:</code> line. In
-      container-runner mode they run unchanged:
+      container-runner mode they run unchanged. To switch an existing runner: <code>ownci stop</code>,
+      then <code>ownci setup --force --mode container-runner</code>.
     </p>
     <Code label="shell" code={crSetup} />
     <Code label=".github/workflows/ci.yml" code={crWorkflow} />
@@ -82,8 +102,8 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
     <p class="section-kicker">Teams</p>
     <h2>One workflow file for a whole team</h2>
     <p>
-      Give each developer’s runner their own label (their GitHub username) and let the workflow
-      pick the runner of whoever triggered it:
+      Give each developer’s runner their own label (<code>dev-</code> plus their GitHub username) and
+      let the workflow pick the runner of whoever triggered it:
     </p>
     <Code label="shell" code={teamSetup} />
     <Code label=".github/workflows/ci.yml" code={teamWorkflow} />
@@ -92,6 +112,50 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
       <li>Bots such as Dependabot match no runner.</li>
       <li>Each developer needs admin access to the repository to run <code>ownci setup</code>.</li>
       <li>Use <code>github.event.pull_request.user.login</code> instead of <code>github.actor</code> to target the PR <em>author</em> rather than whoever pushed last.</li>
+      <li>Keep the <code>dev-</code> prefix. Labels are case-insensitive, and without a prefix a username can equal another runner label: a real GitHub account called <code>ownci</code> exists, and its jobs would become <code>runs-on: [ownci, ownci]</code>, which every OwnCI runner on the repository matches.</li>
+    </ul>
+    <p class="callout">
+      The label routes jobs; it does not restrict who can reach a runner. Anyone who can change the
+      workflow can point <code>runs-on</code> at another developer’s label. To let only maintainers
+      decide, see <a href="#maintainer-control">the next section</a>.
+    </p>
+  </section>
+
+  <section class="docs-section" id="maintainer-control">
+    <p class="section-kicker">Maintainer control</p>
+    <h2>Let only maintainers decide where jobs run</h2>
+    <p>
+      With <code>on: pull_request</code>, GitHub runs the workflow file from the PR, so a PR can
+      change <code>runs-on</code> to any developer’s label. And anyone with write access can push a
+      branch with a workflow of its own (<code>on: push</code>) that targets any runner on the
+      repository. If maintainers should have full control over which jobs reach which machine:
+    </p>
+    <ol>
+      <li>
+        <strong>Run CI from <code>main</code>’s workflow file with <code>pull_request_target</code>.</strong>
+        It always uses the workflow from the base branch, so a PR cannot change <code>runs-on</code>;
+        it still tests the PR’s code.
+        <Code label=".github/workflows/ci.yml" code={maintainerWorkflow} />
+      </li>
+      <li>
+        <strong>Protect the workflow files on <code>main</code>.</strong> Require pull request
+        reviews on <code>main</code> (branch protection or a branch ruleset) with <em>Require review
+        from Code Owners</em>, and a <code>CODEOWNERS</code> entry such as
+        <code>/.github/workflows/ @owner/maintainers</code>.
+      </li>
+      <li>
+        <strong>Block workflow changes on every other branch.</strong> A push ruleset with
+        <em>Restrict file paths</em> set to <code>.github/workflows/**</code>, with maintainers on the
+        bypass list, stops anyone from pushing a branch whose own workflow targets a runner. Push
+        rulesets need GitHub Team or Enterprise and a private or internal repository. Without this
+        step, anyone with write access can still reach every runner on the repository.
+      </li>
+    </ol>
+    <ul>
+      <li><strong>Don’t use secrets or caches in this workflow.</strong> The PR’s code runs in the same job, so anything the job can read, the PR can read, and a cache it saves is visible to <code>main</code>’s workflows.</li>
+      <li><strong><code>pull_request_target</code> ignores the fork pull request approval setting:</strong> it always runs. Keep the author’s <code>dev-</code> label in <code>runs-on</code>; a contributor without a runner of their own gets a job that waits in the queue and reaches no one’s machine. Never combine this trigger with <code>runs-on: [ownci]</code> alone.</li>
+      <li><strong>Maintainers decide where a job runs, not what it runs.</strong> The PR’s scripts (<code>npm ci</code>, its tests) still run on the author’s machine. Anyone with write access who pushes to someone else’s PR branch runs their code on that author’s machine.</li>
+      <li>A PR that changes CI is tested with <code>main</code>’s workflow; the change applies once it is merged, and then reaches every developer’s machine. Review workflow changes like code.</li>
     </ul>
   </section>
 

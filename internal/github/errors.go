@@ -33,7 +33,7 @@ type APIError struct {
 func (e *APIError) Error() string    { return e.msg }
 func (e *APIError) UserHint() string { return e.hint }
 
-// newAPIError maps a failed response to a user-facing error (spec: t05).
+// newAPIError maps a failed response to a user-facing error.
 // repo is "owner/name" or "" when the request was not repo-scoped.
 func newAPIError(status int, message, docURL, repo string, src TokenSource, rateRemaining, rateReset string) *APIError {
 	e := &APIError{Status: status, Message: message, DocURL: docURL}
@@ -47,6 +47,10 @@ func newAPIError(status int, message, docURL, repo string, src TokenSource, rate
 		if reset := parseReset(rateReset); !reset.IsZero() {
 			e.hint = "Try again after " + reset.Local().Format("15:04:05") + "."
 		}
+	case status == 429 || (status == 403 && strings.Contains(strings.ToLower(message), "rate limit")):
+		// Secondary rate limits come without X-RateLimit-Remaining: 0.
+		e.msg = "GitHub API rate limit exceeded"
+		e.hint = "Wait a few minutes and try again."
 	case status == 403:
 		e.msg = fmt.Sprintf("the GitHub token lacks permission: admin access to %s is required", orRepo(repo))
 		e.hint = "Use a fine-grained PAT with 'Administration: read & write' on this repository, or a classic PAT with the 'repo' scope."

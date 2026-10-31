@@ -4,23 +4,24 @@ import { href } from '../lib/paths'
 
 const enforced = [
   ['Container jobs only.', 'In host mode the runner is configured to reject any job without a container: line. If OwnCI can’t establish this, it refuses to start the runner.'],
-  ['The runner stays in its container.', 'In container-runner mode the runner is only ever started inside its container, which is replaced after every job. The cleanup hook is mounted read-only, so a job can’t switch the wipe off.'],
+  ['The runner stays in its container.', 'In container-runner mode the runner is only ever started inside its container, which is replaced after every job. The cleanup hook is mounted read-only, so a job can’t disable the wipe by editing it.'],
   ['A clean workspace for every job.', 'After each job, _work (workspace, actions, tools) is wiped from a throwaway, network-less container using a digest-pinned image. If the cleanup fails, the job fails visibly.'],
-  ['Opt-in label.', 'The runner carries only the ownci label, so a stray runs-on: self-hosted never lands on your laptop.'],
+  ['Opt-in label.', 'The runner carries the ownci label (plus any you add with --labels) and none of GitHub’s default or hosted-runner labels, so a stray runs-on: self-hosted or runs-on: ubuntu-latest never lands on your laptop.'],
+  ['Visibility re-checked.', 'Unless you accepted a public repository at setup, start checks again (when a GitHub token is available) and refuses to run if the repository has become public. status --remote flags it too.'],
   ['No privileged containers.', 'None of the containers OwnCI uses are privileged.'],
-  ['Tokens handled carefully.', 'Your GitHub token is never stored and the registration token is single-use. Runner credentials live in directories with mode 0700 and files with mode 0600, and tokens are redacted from the logs OwnCI writes and captures.'],
+  ['Tokens handled carefully.', 'Your GitHub token is never stored. The registration token is short-lived and reaches the runner through its environment, not its command line. The runner’s credentials live in its directory under runners/, mode 0700 like the rest of the data directory; OwnCI’s own files are mode 0600. GITHUB_TOKEN and GH_TOKEN are removed from the runner’s environment, so jobs never inherit them. Tokens are redacted from the logs OwnCI writes and captures.'],
   ['Checked every time.', 'All of this is re-asserted on every start and reported by status and doctor.'],
 ]
 
 const limits = [
-  ['The Docker socket is mounted into job containers.', 'The official runner does this, and jobs run as root. A job can therefore control your Docker daemon, which is effectively root on your machine. The container is a barrier against accidents, not against a malicious workflow.'],
+  ['The Docker socket is mounted into job containers.', 'The official runner does this, and jobs run as root. A job can therefore control your Docker daemon, which is effectively root on your machine: it can start privileged containers, mount host paths and read other containers’ data. The container is a barrier against accidents, not against a malicious workflow.'],
   ['Network.', 'Job containers use Docker’s default network and can reach the internet and your LAN. OwnCI sets no network policy.'],
   ['Sibling containers.', 'services:, uses: docker://… and Dockerfile actions run as siblings on your Docker daemon, outside the job container and outside OwnCI’s control.'],
-  ['Shared Docker daemon.', 'Jobs share the daemon, images and build cache with everything else on the machine. Images persist between jobs; only _work is wiped.'],
+  ['Shared Docker daemon.', 'Jobs share the daemon, images and build cache with everything else on the machine (with Docker Desktop, with Windows too). Images persist between jobs; only _work is wiped.'],
   ['Root in the container.', 'Containers run as root by default and can read and write the runner’s work directories while a job runs.'],
   ['The runner runs on your host as you.', 'OwnCI only allows container jobs, but a vulnerability in the runner, Docker or an image is a vulnerability on your machine.'],
   ['No resource limits.', 'No CPU, memory or disk limits are applied to jobs.'],
-  ['Container-runner credentials.', 'In container-runner mode a job without container: runs next to the runner’s registration credentials and can read or change them while it runs.'],
+  ['Container-runner credentials.', 'In container-runner mode a job without container: runs next to the runner’s files, including its registration credentials, and can read or change them while it runs.'],
 ]
 ---
 
@@ -52,8 +53,16 @@ const limits = [
           code on a self-hosted runner.
         </p>
         <p>
-          If you accept that risk anyway, set the repository’s <em>Fork pull request workflows from
-          outside collaborators</em> to <em>Require approval for all outside collaborators</em>.
+          If you accept that risk anyway, set the repository’s <em>Approval for running fork pull
+          request workflows from contributors</em> to <em>Require approval for all external
+          contributors</em> (Settings → Actions → General), and read each pull request, including its
+          changes to <code>.github/workflows/</code>, before you approve its run: approving runs that
+          code on your machine.
+        </p>
+        <p>
+          In a team, the per-developer label routes jobs but does not restrict who can reach a
+          runner. To let only maintainers decide which jobs reach which machine, see
+          <a href={href('/docs/workflows/#maintainer-control')}>Let only maintainers decide where jobs run</a>.
         </p>
       </div>
     </section>

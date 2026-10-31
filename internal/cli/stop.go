@@ -35,11 +35,16 @@ runner back. A running job is cancelled. If the runner does not stop within
 				return nil
 			}
 			if err != nil {
-				return &UserError{Msg: err.Error(), Hint: "Re-run 'ownci setup --force' to recreate the configuration."}
+				return &UserError{Msg: err.Error(), Hint: "Re-run 'ownci setup --repo <owner/name> --force' to recreate the configuration."}
 			}
 			name := cfg.Runner.Name
 			if running, _, err := supervisor.IsRunning(app.Paths, name); err == nil && running {
 				fmt.Fprintf(app.Out, "Stopping runner '%s' (a running job is cancelled)…\n", name)
+			}
+			if cfg.Runner.EffectiveMode() == config.ModeContainerRunner && !cmd.Flags().Changed("timeout") {
+				// The runner's own grace period plus 'docker stop' can take
+				// about a minute; don't report a timeout while it still exits.
+				timeout = containerStopTimeout
 			}
 			so := supervisor.StopOptions{Timeout: timeout, Force: force}
 			if cfg.Runner.EffectiveMode() == config.ModeContainerRunner {
@@ -65,10 +70,13 @@ runner back. A running job is cancelled. If the runner does not stop within
 			return nil
 		},
 	}
-	cmd.Flags().DurationVar(&timeout, "timeout", 45*time.Second, "how long to wait for a graceful stop")
+	cmd.Flags().DurationVar(&timeout, "timeout", 45*time.Second, "how long to wait for a graceful stop (container-runner mode: 75s unless set)")
 	cmd.Flags().BoolVar(&force, "force", false, "kill the runner if it does not stop within --timeout")
 	return cmd
 }
+
+// containerStopTimeout is the default --timeout in container-runner mode.
+const containerStopTimeout = 75 * time.Second
 
 // removeLeftoverContainer removes a runner container that outlived its
 // supervisor (killed, or the machine went down). It would otherwise keep the

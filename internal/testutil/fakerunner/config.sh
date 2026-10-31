@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fake of actions/runner config.sh (behavior contract: tasks/t04-runner-download.md).
+# Fake of actions/runner config.sh (only the behavior OwnCI relies on).
 VERSION="__FAKE_VERSION__"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR" || exit 1
@@ -20,7 +20,7 @@ if [ "${1:-}" = "remove" ]; then
   shift
 fi
 
-url="" token="" name="" labels="" work="_work" replace=0
+url="" token="${ACTIONS_RUNNER_INPUT_TOKEN:-}" name="" labels="" work="_work" replace=0
 args=("$@")
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -87,6 +87,31 @@ func entries(t *testing.T, dir string) []string {
 	return names
 }
 
+func TestCleanupRemovesSymlinkedTemp(t *testing.T) {
+	r := newHookRig(t)
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "precious"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"_temp", "_PipelineMapping"} {
+		if err := os.RemoveAll(filepath.Join(r.work, d)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(r.work, d)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, code := r.run(r.defaultEnv()...); code != 0 {
+		t.Fatalf("exit %d, output %q", code, out)
+	}
+	if got := entries(t, r.work); len(got) != 0 {
+		t.Errorf("_work = %v, want the symlinks removed", got)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "precious")); err != nil {
+		t.Error("a file behind a symlink was deleted")
+	}
+}
+
 func TestCleanupKeepsOnlyTempAndPipelineMapping(t *testing.T) {
 	r := newHookRig(t)
 	out, code := r.run(r.defaultEnv()...)
@@ -119,7 +144,7 @@ func TestCleanupContainerArguments(t *testing.T) {
 	if run == "" {
 		t.Fatalf("no docker run recorded: %v", r.fd.Calls())
 	}
-	for _, want := range []string{"--rm", "--pull never", "--network none", "--label ownci.managed=true", "-v " + r.work + ":/w", CleanupImage} {
+	for _, want := range []string{"--rm", "--pull missing", "--network none", "--label ownci.managed=true", "-v " + r.work + ":/w", CleanupImage} {
 		if !strings.Contains(run, want) {
 			t.Errorf("docker run lacks %q:\n%s", want, run)
 		}
@@ -186,6 +211,9 @@ func TestCleanupRefusesUnexpectedWorkDir(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(outside, "precious")); err != nil {
 			t.Error("a file behind the symlink was deleted")
+		}
+		if got := r.lastCleanup()["result"]; got != "failed" {
+			t.Errorf("last cleanup result = %q, want failed (status must not keep showing ok)", got)
 		}
 		if len(r.fd.Calls()) != 0 {
 			t.Errorf("docker was called: %v", r.fd.Calls())

@@ -7,9 +7,13 @@
 # the release's SHA256SUMS before anything is installed.
 #
 # Environment:
-#   OWNCI_VERSION        release tag to install, e.g. v0.1.0 (default: the latest release)
+#   OWNCI_VERSION        release tag to install, e.g. v0.1.0 (default or "latest": the latest release)
 #   OWNCI_INSTALL_DIR    where to put the binary (default: $HOME/.local/bin)
 #   OWNCI_DOWNLOAD_BASE  base URL of the release downloads (default: GitHub; for testing)
+#
+# The checksum proves the download is intact. To also check where it was built, verify the
+# release's build-provenance attestation with the GitHub CLI:
+#   gh attestation verify ownci_<version>_linux_<arch>.tar.gz --repo ashfaqc137/ownci
 #
 # Everything runs from main, called on the last line, so a truncated download runs nothing.
 set -eu
@@ -62,7 +66,7 @@ main() {
 
 	arch="$(detect_arch)"
 	version="${OWNCI_VERSION:-}"
-	if [ -z "$version" ]; then
+	if [ -z "$version" ] || [ "$version" = latest ]; then
 		version="$(latest_version)"
 	fi
 	case "$version" in
@@ -96,13 +100,19 @@ main() {
 	install -m 0755 "$tmp/ownci" "$install_dir/ownci"
 	say "installed $install_dir/ownci"
 
+	ownci="ownci"
 	case ":$PATH:" in
 	*":$install_dir:"*) ;;
-	*) say "note: $install_dir is not on your PATH; add it, e.g.: export PATH=\"$install_dir:\$PATH\"" ;;
+	*)
+		ownci="$install_dir/ownci"
+		say "note: $install_dir is not on your PATH. To add it for new shells, run:"
+		say "  echo 'export PATH=\"$install_dir:\$PATH\"' >> ~/.profile   # or your shell's rc file, e.g. ~/.bashrc or ~/.zshrc"
+		say "  then open a new terminal. Until then, use the full path: $ownci"
+		;;
 	esac
 
 	"$install_dir/ownci" version
-	say "next: run 'ownci doctor', then 'ownci setup --repo owner/name'"
+	say "next: run '$ownci doctor', then '$ownci setup --repo owner/name'"
 }
 
 main "$@"

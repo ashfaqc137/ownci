@@ -120,7 +120,7 @@ func TestRefusesRootDataDir(t *testing.T) {
 func TestLogRedactsTokenArgs(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "data")
 	const tok = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
-	runCLI(t, "--data-dir", dir, "setup", "--", "--token", tok)
+	runCLI(t, "--data-dir", dir, "setup", "--repo", "me/x", "--name", tok)
 	log, err := os.ReadFile(filepath.Join(dir, "logs", "ownci.log"))
 	if err != nil {
 		t.Fatal(err)

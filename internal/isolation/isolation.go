@@ -1,5 +1,5 @@
 // Package isolation installs, repairs and checks what makes the runner's
-// isolation policy real (D1, D10, D13): the job-container requirement (host
+// isolation policy real: the job-container requirement (host
 // mode) in the runner's .env, the per-job cleanup hook with its pinned image,
 // and the runner image (container-runner mode).
 package isolation
@@ -44,7 +44,7 @@ type Policy struct {
 	RunnerImage  string // container-runner mode only
 }
 
-// HostPolicy is the host-mode policy (D1).
+// HostPolicy is the host-mode policy.
 func HostPolicy() Policy { return Policy{Mode: config.ModeHost, CleanupImage: hooks.CleanupImage} }
 
 // PolicyFor is the policy of a configured runner; image overrides the

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,11 +31,11 @@ import (
 )
 
 const (
-	// IsolationMode is recorded in config.json for host mode (D1).
+	// IsolationMode is recorded in config.json for host mode.
 	IsolationMode = "docker-job-container"
-	// IsolationRunnerContainer is recorded for container-runner mode (D13).
+	// IsolationRunnerContainer is recorded for container-runner mode.
 	IsolationRunnerContainer = "docker-runner-container"
-	securityDocs             = "https://docs.github.com/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security"
+	securityDocs             = "https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners"
 	permissionFix            = "Use a fine-grained PAT with 'Administration: read & write' on this repository, or a classic PAT with the 'repo' scope."
 )
 
@@ -96,8 +97,7 @@ type run struct {
 	prog  *progress.Printer
 }
 
-// Run executes the setup flow. See tasks/t06-setup.md for the step list; the
-// numbers in comments refer to it.
+// Run executes the setup flow; the numbered comments mark its steps.
 func Run(ctx context.Context, d Deps, o Options) error {
 	if d.Now == nil {
 		d.Now = time.Now
@@ -107,7 +107,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	}
 	repo, err := github.ParseRepo(o.Repo)
 	if err != nil {
-		return err
+		return usageError(err)
 	}
 	labels, err := ValidateLabels(o.Labels)
 	if err != nil {
@@ -115,7 +115,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	}
 	if o.Mode != "" && !config.ValidMode(o.Mode) {
 		return &Error{Usage: true, Msg: fmt.Sprintf("unknown --mode %q", o.Mode),
-			Hint: fmt.Sprintf("Use --mode %s (jobs must declare container:) or --mode %s (the runner runs in a container that is the default job image).", config.ModeHost, config.ModeContainerRunner)}
+			Hint: fmt.Sprintf("Use --mode %s (jobs must declare container:) or --mode %s (the runner runs in a container; jobs without container: run in its image).", config.ModeHost, config.ModeContainerRunner)}
 	}
 	name := o.Name
 	if name == "" {
@@ -137,7 +137,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 		return err
 	}
 	if err := runner.ValidateName(r.name); err != nil {
-		return err
+		return usageError(err)
 	}
 	r.dir = d.Paths.RunnerDir(r.name)
 	if o.Labels == nil && prev != nil {
@@ -171,13 +171,13 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	}
 
 	repoURL := d.WebBaseURL + "/" + repo.String()
-	reuse := registered && o.Force // an extracted, registered runner is kept as is
+	reuse := registered && o.Force // an extracted, registered runner is kept as is, unless outdated
 	if o.DryRun {
 		return r.dryRun(repoURL, allLabels, reuse)
 	}
 
 	// 6. Download & extract.
-	version, err := r.install(ctx, reuse, prev)
+	version, reused, err := r.install(ctx, reuse, prev)
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 			return err
 		}
 	}
-	// 7. Registration token (single-use, short-lived).
+	// 7. Registration token (short-lived).
 	r.prog.Step("Registering the runner with GitHub")
 	reg, err := gh.RegistrationToken(ctx, repo)
 	if err != nil {
@@ -199,7 +199,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 			URL: repoURL, Token: reg.Token, Name: r.name, Labels: allLabels, Replace: o.Force,
 		})
 	}
-	if reuse {
+	if reused {
 		err = r.reconfigure(configure)
 	} else {
 		err = configure()
@@ -225,6 +225,7 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	cfg := &config.Config{Runner: &config.RunnerConfig{
 		Name: r.name, Provider: "github", Repo: repo.String(), URL: repoURL, Labels: allLabels,
 		InstalledVersion: version, Isolation: IsolationMode, Mode: r.mode, CreatedAt: created,
+		AllowPublicRepo: o.AllowPublicRepo,
 	}}
 	if r.mode == config.ModeContainerRunner {
 		cfg.Runner.Isolation, cfg.Runner.Image = IsolationRunnerContainer, r.image
@@ -251,14 +252,16 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	fmt.Fprintf(d.Out, "Next:\n  1. Start contributing compute:   ownci start\n"+
 		"  2. Target it from a workflow:    runs-on: [ownci]   and   container: <image>\n"+
 		"     (jobs without 'container:' will be rejected by this runner)\n"+
-		"Isolation notes: job containers can still reach the network, and 'services:' and\n"+
-		"'uses: docker://…' actions run as sibling containers on the same Docker daemon.\n")
+		"Isolation notes: every job container gets the host's Docker socket, which is\n"+
+		"root-equivalent on this machine, so run only workflows you trust. Job containers\n"+
+		"can reach the network, and 'services:' and 'uses: docker://…' actions run as\n"+
+		"sibling containers on the same Docker daemon.\n")
 	return nil
 }
 
 // resolveMode settles the execution mode and runner image: the flags win, an
 // existing setup's mode is kept when --mode is not given, and a new setup is
-// host mode (D1).
+// host mode.
 func (r *run) resolveMode(prev *config.RunnerConfig) error {
 	r.mode = r.o.Mode
 	if r.mode == "" {
@@ -271,6 +274,12 @@ func (r *run) resolveMode(prev *config.RunnerConfig) error {
 		if r.o.Image != "" {
 			return &Error{Usage: true, Msg: "--image needs --mode " + config.ModeContainerRunner,
 				Hint: "In host mode each job names its image with 'container:'."}
+		}
+		// The cleanup hook bind-mounts _work, and Docker's -v cannot express
+		// these characters.
+		if strings.ContainsAny(r.dir, ":,") {
+			return &Error{Msg: fmt.Sprintf("runner directory %q contains ':' or ',', which Docker mounts cannot express", r.dir),
+				Hint: "Use a data directory without ':' or ',', e.g. --data-dir ~/.local/share/ownci."}
 		}
 		return nil
 	}
@@ -354,7 +363,7 @@ func (r *run) detectExisting() (prev *config.RunnerConfig, registered bool, err 
 	}
 
 	if prev != nil {
-		// D11: one runner per data dir, so a different repo or name needs an
+		// One runner per data dir, so a different repo or name needs an
 		// uninstall first, force or not.
 		if prev.Repo != r.repo.String() {
 			return nil, false, &Error{
@@ -373,7 +382,7 @@ func (r *run) detectExisting() (prev *config.RunnerConfig, registered bool, err 
 		}
 	}
 	if err := runner.ValidateName(r.name); err != nil {
-		return nil, false, err
+		return nil, false, usageError(err)
 	}
 	registered = runner.Registered(d.Paths.RunnerDir(r.name))
 	if registered && !o.Force {
@@ -406,7 +415,7 @@ func (r *run) detectExisting() (prev *config.RunnerConfig, registered bool, err 
 	return prev, registered, nil
 }
 
-// checkRepo enforces the trust gate (D3) and the admin requirement.
+// checkRepo enforces the trust gate and the admin requirement.
 func (r *run) checkRepo(ctx context.Context, gh *github.Client) error {
 	info, err := gh.GetRepo(ctx, r.repo)
 	if err != nil {
@@ -423,7 +432,7 @@ func (r *run) checkRepo(ctx context.Context, gh *github.Client) error {
 		fmt.Fprintf(r.d.Err, "\nWARNING: %s is a public repository.\n"+
 			"  Pull requests from forks can run arbitrary code on this machine.\n"+
 			"  Strongly recommended: in the repository's Settings → Actions → General, set\n"+
-			"  \"Fork pull request workflows from outside collaborators\" to \"Require approval for all outside collaborators\".\n"+
+			"  \"Approval for running fork pull request workflows from contributors\" to \"Require approval for all external contributors\".\n"+
 			"  See %s\n\n", r.repo, securityDocs)
 	}
 	if !info.Admin {
@@ -451,24 +460,38 @@ func (r *run) checkNameFree(ctx context.Context, gh *github.Client) error {
 }
 
 // install downloads and extracts the runner, unless a registered runner is
-// being re-registered in place. It returns the installed version ("" when it
-// could not be read).
-func (r *run) install(ctx context.Context, reuse bool, prev *config.RunnerConfig) (string, error) {
+// being re-registered in place and is not older than the one OwnCI pins (a
+// runner that could not self-update is replaced). It returns the installed
+// version ("" when it could not be read) and whether the runner was reused.
+func (r *run) install(ctx context.Context, reuse bool, prev *config.RunnerConfig) (string, bool, error) {
 	d := r.d
+	asset, assetErr := d.AssetFor(d.Platform.RunnerArch)
 	if reuse {
 		v, err := runner.InstalledVersion(ctx, d.Exec, r.dir)
 		if err != nil {
 			r.warn("could not read the installed runner version: %v", err)
 			if prev != nil {
-				return prev.InstalledVersion, nil
+				v = prev.InstalledVersion
 			}
 		}
-		r.ok("Reusing the extracted runner %s", orUnknown(v))
-		return v, nil
+		if assetErr != nil || !olderVersion(v, asset.Version) {
+			r.ok("Reusing the extracted runner %s", orUnknown(v))
+			return v, true, nil
+		}
+		r.ok("The extracted runner %s is older than %s: replacing it", v, asset.Version)
 	}
-	asset, err := d.AssetFor(d.Platform.RunnerArch)
-	if err != nil {
-		return "", err
+	if assetErr != nil {
+		return "", false, assetErr
+	}
+	// An outdated registered runner is replaced like an unfinished setup; its
+	// registration files are set aside so a failed download keeps it intact,
+	// and config.sh --replace takes over the registration on GitHub.
+	restore := func() error { return nil }
+	if reuse {
+		var err error
+		if restore, _, err = runner.SetAsideRegistration(r.dir); err != nil {
+			return "", false, &Error{Msg: err.Error(), Hint: "Check that " + r.dir + " is writable.", Err: err}
+		}
 	}
 	// A directory without .runner is a previous, unfinished setup: replace it.
 	_, statErr := os.Lstat(r.dir)
@@ -477,17 +500,20 @@ func (r *run) install(ctx context.Context, reuse bool, prev *config.RunnerConfig
 		Force: statErr == nil, Progress: r.prog, Logger: d.Logger,
 	})
 	if err != nil {
-		return "", err
+		if rerr := restore(); rerr != nil {
+			r.warn("restoring the previous registration files failed: %v", rerr)
+		}
+		return "", false, err
 	}
 	if res.VersionErr != nil {
 		r.warn("runner extracted to %s but its version could not be read: %v", res.Dir, res.VersionErr)
-		return "", nil
+		return "", false, nil
 	}
 	if res.InstalledVersion != res.ExpectedVersion {
 		r.warn("installed runner reports version %s, expected %s", res.InstalledVersion, res.ExpectedVersion)
 	}
 	r.ok("Runner %s downloaded, verified and extracted", res.InstalledVersion)
-	return res.InstalledVersion, nil
+	return res.InstalledVersion, false, nil
 }
 
 // prepareImage pulls the runner image unless it is present (it may be built
@@ -573,9 +599,9 @@ func (r *run) dryRun(repoURL string, labels []string, reuse bool) error {
 		fmt.Fprintf(out, "Would download runner %s from %s\n  sha256 %s\n  and extract it to %s\n", asset.Version, asset.URL, asset.SHA256, r.dir)
 	}
 	args := runner.ConfigureArgs(runner.ConfigureOptions{
-		URL: repoURL, Token: "", Name: r.name, Labels: labels, Replace: r.o.Force,
-	}, true)
-	fmt.Fprintf(out, "Would run, in %s:\n  ./config.sh %s\n", r.dir, strings.Join(args, " "))
+		URL: repoURL, Name: r.name, Labels: labels, Replace: r.o.Force,
+	})
+	fmt.Fprintf(out, "Would run, in %s:\n  %s=*** ./config.sh %s\n", r.dir, runner.TokenEnv, strings.Join(args, " "))
 	if r.mode == config.ModeContainerRunner {
 		fmt.Fprintf(out, "Would install the cleanup hook in %s and pull %s\n", filepath.Join(r.dir, ".env"), hooks.CleanupImage)
 		fmt.Fprintf(out, "Would pull and probe the runner image %s (mode %s: jobs without 'container:' run in it)\n", r.image, r.mode)
@@ -586,7 +612,7 @@ func (r *run) dryRun(repoURL string, labels []string, reuse bool) error {
 	return nil
 }
 
-// installIsolation makes D1 and D10 real: the job-container requirement and
+// installIsolation makes the isolation policy real: the job-container requirement and
 // the cleanup hook in the runner's .env, and the pinned cleanup image. The
 // runner is already registered at this point, so a failure tells the user how
 // to retry.
@@ -603,12 +629,48 @@ func installIsolation(ctx context.Context, d Deps, dir, repo string, p isolation
 	}
 }
 
+// usageError marks bad input (an invalid --repo or --name) so the CLI exits
+// with the usage code.
+func usageError(err error) error {
+	return &Error{Usage: true, Msg: err.Error(), Hint: hintOr(err, ""), Err: err}
+}
+
 func hintOr(err error, def string) string {
 	var h interface{ UserHint() string }
 	if errors.As(err, &h) && h.UserHint() != "" {
 		return h.UserHint()
 	}
 	return def
+}
+
+// olderVersion reports whether runner version a (e.g. "2.330.0") is older
+// than b. Only the leading digits of each part count; versions that do not
+// parse are never older.
+func olderVersion(a, b string) bool {
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	if len(pa) != 3 || len(pb) != 3 {
+		return false
+	}
+	for i := range pa {
+		x, okA := leadingInt(pa[i])
+		y, okB := leadingInt(pb[i])
+		if !okA || !okB {
+			return false
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
+}
+
+func leadingInt(s string) (int, bool) {
+	end := 0
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	n, err := strconv.Atoi(s[:end])
+	return n, err == nil
 }
 
 func orUnknown(v string) string {

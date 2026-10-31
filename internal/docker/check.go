@@ -34,8 +34,7 @@ type Status struct {
 // OK reports whether Docker is usable for OwnCI.
 func (s Status) OK() bool { return s.Err == nil }
 
-// Client groups docker operations behind an execx.Runner. t08 adds the
-// cleanup container run here.
+// Client groups docker operations behind an execx.Runner.
 type Client struct{ Exec execx.Runner }
 
 // Check diagnoses the local Docker installation.

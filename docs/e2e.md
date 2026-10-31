@@ -49,7 +49,7 @@ $O setup --repo $OWNCI_E2E_REPO
 ```
 Expect, in order: preflight passed; GitHub token source; `Repository … (private)`; runner
 downloaded, **verified** and extracted (the pinned version); `Runner configured`; `Runner
-registered on GitHub (id N)`; `OwnCI is set up for … as runner 'ownci-<host>' (labels: ownci)`.
+registered on GitHub (id N)`; `OwnCI is set up for … as runner 'ownci-<host>' (labels: ownci, mode: host)`.
 
 Check:
 - GitHub → repo → Settings → Actions → Runners shows the runner with **only** the `ownci` label.
@@ -117,7 +117,7 @@ $O stop                  # ✓ Runner '…' stopped (registration kept …)
 $O status                # Process not running; State stopped
 $O start --detach        # listening again, WITHOUT a new registration (same runner id in the UI)
 ```
-Open a new PR (or re-run the PR check): it passes. Configuration persisted (PRD §12).
+Open a new PR (or re-run the PR check): it passes. Configuration persisted.
 
 ### 10. Kill test
 During an idle period:
@@ -136,7 +136,7 @@ $O logs -n 50
 $O logs --source ownci -n 50
 grep -rEI 'gh[pousr]_[A-Za-z0-9]{20,}|github_pat_' "$OWNCI_DATA" && echo LEAK || echo "no tokens found"
 ```
-Expect: `no tokens found`. (Registration/removal tokens are single-use and masked as `***`.)
+Expect: `no tokens found`. (Registration/removal tokens are short-lived, passed in the environment and masked as `***`.)
 
 ### 12. Uninstall
 ```bash
@@ -146,7 +146,7 @@ Expect: `✓ Runner unregistered from <repo>`; summary: `Runner process stopped`
 `Local files removed (… is gone)`. The runner has disappeared from Settings → Actions → Runners,
 and `ls $OWNCI_DATA` fails. Clean up the sandbox's `ownci-e2e-*` branches/PRs if you like.
 
-## Container-runner mode (t11)
+## Container-runner mode
 
 Run this after the host-mode steps, or on its own with a fresh data dir. It verifies
 that jobs **without** `container:` run in the runner container, that jobs **with** one
@@ -197,7 +197,8 @@ $O start --detach            # removes the leftover container first, then listen
 
 ### C4. A custom runner image (Ubuntu 22.04)
 ```bash
-docker run --rm ubuntu:22.04 true    # plain image: expect setup to refuse it
+docker pull ubuntu:22.04
+# a plain image: expect setup to refuse it
 ./bin/ownci --data-dir /tmp/ownci-e2e-bad setup --repo $OWNCI_E2E_REPO --mode container-runner --image ubuntu:22.04
 docker build -t ownci-test/ubuntu22-runner:1 -f e2e/images/ubuntu22.Dockerfile .
 $O setup --repo $OWNCI_E2E_REPO --force --mode container-runner --image ownci-test/ubuntu22-runner:1
@@ -217,7 +218,7 @@ docker ps -a --filter name=ownci-     # nothing
 ls /home/runner 2>/dev/null           # nothing: no stray directories on the host
 ```
 
-## Acceptance checklist (PRD §12)
+## Acceptance checklist
 
 Tick in [`acceptance.md`](acceptance.md) with evidence (log excerpt, run URL, screenshot path).
 
@@ -259,7 +260,7 @@ Record anything that differed from the expectations above. Template:
 
 | Step | Expected | Actual | Impact / follow-up |
 |---|---|---|---|
-| 8 | The hook runs after the job container stops (D10 risk) | | |
+| 8 | The hook runs after the job container stops | | |
 | 8 | Wiping `_work` (except `_temp`, `_PipelineMapping`) does not break the runner | | |
 | 5/9 | The runner version is the pinned one / self-updated to … | | |
 | 10 | The runner process after `kill -9` of the supervisor | | |

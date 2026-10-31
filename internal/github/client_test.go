@@ -170,6 +170,8 @@ func TestErrorMapping(t *testing.T) {
 		{"401 gh", 401, `{"message":"Bad credentials"}`, nil, SourceGH, "invalid or expired", "gh auth login"},
 		{"403 permission", 403, `{"message":"Resource not accessible"}`, nil, "", "admin access to me/private-one is required", "Administration: read & write"},
 		{"403 rate limit", 403, `{"message":"API rate limit exceeded"}`, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1893456000"}, "", "rate limit", "Try again after"},
+		{"403 secondary rate limit", 403, `{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}`, map[string]string{"X-RateLimit-Remaining": "4000"}, "", "rate limit exceeded", "Wait a few minutes"},
+		{"429", 429, `{"message":"Too Many Requests"}`, nil, "", "rate limit exceeded", "Wait a few minutes"},
 		{"404", 404, `{"message":"Not Found"}`, nil, "", "repository not found or token cannot see it", "owner/name"},
 		{"500", 500, `{"message":"Server exploded","documentation_url":"https://docs.example/x"}`, nil, "", "(HTTP 500): Server exploded", ""},
 		{"502 html", 502, `<html>bad gateway</html>`, nil, "", "(HTTP 502): Bad Gateway", ""},

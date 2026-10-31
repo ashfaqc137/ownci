@@ -1,6 +1,7 @@
 ---
-// Code is passed as a string prop and rendered as escaped text, so snippets containing
-// `${{ ... }}` or `<...>` need no escaping in the pages that use it.
+// Code is passed as a string prop and rendered as escaped text, so `<...>` needs no HTML
+// escaping. Pages write snippets as JS template literals, so `${{ ... }}` must be written
+// as `\${{ ... }}` there.
 interface Props {
   code: string
   label?: string
@@ -11,5 +12,5 @@ const { code, label } = Astro.props
 
 <figure class="code-block">
   {label && <figcaption>{label}</figcaption>}
-  <pre><code>{code.trim()}</code></pre>
+  <pre tabindex="0" aria-label={label ? `Code: ${label}` : 'Code'}><code>{code.trim()}</code></pre>
 </figure>

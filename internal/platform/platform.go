@@ -43,7 +43,7 @@ func DetectWith(readFile func(string) ([]byte, error), getenv func(string) strin
 	return info
 }
 
-// Supported reports whether the platform can host a runner (D9).
+// Supported reports whether the platform can host a runner.
 func (i Info) Supported() error {
 	if i.OS != "linux" {
 		return fmt.Errorf("unsupported platform %s/%s: ownci supports Linux (including WSL2) only", i.OS, i.Arch)

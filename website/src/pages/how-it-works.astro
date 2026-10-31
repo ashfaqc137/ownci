@@ -25,7 +25,7 @@ jobs:
 const team = `
 jobs:
   build:
-    runs-on: [ownci, "\${{ github.actor }}"]   # the runner of whoever pushed
+    runs-on: [ownci, "dev-\${{ github.actor }}"]   # the user who opened or pushed to the PR
     container: node:22
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +34,7 @@ jobs:
 ---
 
 <BaseLayout
-  title="How OwnCI works"
+  title="How it works · OwnCI"
   description="GitHub keeps the workflows, the queue and the PR check. OwnCI runs the official GitHub Actions runner on your machine, puts every job in a container and wipes the workspace afterwards."
 >
   <main id="main" class="content-page">
@@ -120,7 +120,8 @@ jobs:
         </article>
       </div>
       <p class="callout">
-        Switch with <code>ownci setup --repo owner/name --mode container-runner</code>. The default
+        Choose it with <code>ownci setup --repo owner/name --mode container-runner</code>, or switch an
+        existing runner with <code>ownci stop</code>, then <code>ownci setup --force --mode container-runner</code>. The default
         image is the official <code>ghcr.io/actions/actions-runner</code>, pinned by digest. <a href={href('/docs/workflows/')}>Details in the docs →</a>
       </p>
     </section>
@@ -132,14 +133,15 @@ jobs:
       </div>
       <div class="prose">
         <p>
-          Give each developer’s runner their GitHub username as an extra label, and let the
-          workflow pick the runner of whoever triggered it. Your pushes run on your machine, your
+          Give each developer’s runner an extra label, <code>dev-</code> plus their GitHub
+          username, and let the workflow pick the runner of whoever triggered it. Your pushes run on your machine, your
           teammate’s on theirs.
         </p>
         <Code label="workflow.yml" code={team} />
         <p>
-          If someone’s runner is offline, their job waits in the queue. It never lands on someone
-          else’s machine.
+          If someone’s runner is offline, their job waits in the queue. The label routes jobs; it
+          doesn’t stop someone who edits the workflow from picking another runner.
+          <a href={href('/docs/workflows/#maintainer-control')}>Let only maintainers decide →</a>
         </p>
       </div>
     </section>

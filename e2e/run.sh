@@ -84,7 +84,7 @@ for f in "$here"/workflows/*.yml; do
   put_file ".github/workflows/$(basename "$f")" "$f" "$base"
 done
 
-# --- 1. pull request check (PRD: a real PR check runs on local compute) ------
+# --- 1. pull request check (a real PR check runs on local compute) ------
 branch="ownci-e2e-$stamp"
 say "opening a pull request from $branch"
 since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

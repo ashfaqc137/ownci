@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fake of actions/runner run.sh (behavior contract: tasks/t04-runner-download.md).
+# Fake of actions/runner run.sh (only the behavior OwnCI relies on).
 VERSION="__FAKE_VERSION__"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR" || exit 1

@@ -11,7 +11,7 @@ import (
 )
 
 // devWarning returns the one-line warning for dev builds with OWNCI_DEV_*
-// overrides set (D8), or "" when there is nothing to warn about. It lives in a
+// overrides set, or "" when there is nothing to warn about. It lives in a
 // dev-only file so release binaries carry none of the override names.
 func devWarning(environ []string) string {
 	var names []string

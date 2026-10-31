@@ -1,4 +1,4 @@
-// Package doctor runs read-only health checks and collects their results.
+// Package doctor runs health checks and collects their results.
 package doctor
 
 import (

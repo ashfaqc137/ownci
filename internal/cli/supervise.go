@@ -183,7 +183,7 @@ func loadConfigFor(app *App) (*config.Config, error) {
 		}
 	}
 	if err != nil {
-		return nil, &UserError{Msg: err.Error(), Hint: "Re-run 'ownci setup --force' to recreate the configuration."}
+		return nil, &UserError{Msg: err.Error(), Hint: "Re-run 'ownci setup --repo <owner/name> --force' to recreate the configuration."}
 	}
 	return cfg, nil
 }

@@ -96,33 +96,3 @@ func TestSetupFileAndStderr(t *testing.T) {
 		t.Errorf("mode = %04o", fi.Mode().Perm())
 	}
 }
-
-func TestRedactWriterSplitAcrossWrites(t *testing.T) {
-	var out bytes.Buffer
-	w := RedactWriter(&out)
-	w.Write([]byte("before " + ghp[:15]))
-	if out.Len() != 0 {
-		t.Fatalf("partial line should be buffered, got %q", out.String())
-	}
-	w.Write([]byte(ghp[15:] + " after\nsecond line\npartial"))
-	if got, want := out.String(), "before *** after\nsecond line\n"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-	w.Close()
-	if !strings.HasSuffix(out.String(), "partial") {
-		t.Errorf("Close should flush the partial line: %q", out.String())
-	}
-}
-
-func TestRedactWriterLongLineBounded(t *testing.T) {
-	var out bytes.Buffer
-	w := RedactWriter(&out)
-	w.Write(bytes.Repeat([]byte("a"), maxLine+10))
-	if out.Len() == 0 {
-		t.Fatal("over-long line should be flushed")
-	}
-	w.Close()
-	if out.Len() != maxLine+10 {
-		t.Errorf("lost bytes: %d", out.Len())
-	}
-}

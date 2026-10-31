@@ -12,7 +12,7 @@ const (
 	exitOK        = 0
 	exitFailure   = 1
 	exitUsage     = 2
-	exitDoctorBad = 3 // used by doctor (t03)
+	exitDoctorBad = 3 // used by doctor
 )
 
 // UserError is a failure the user can act on. Hint is optional.

@@ -9,34 +9,34 @@ const rows = [
   ['running as root', 'Run ownci as a normal user.'],
   ['ICU library (libicuuc) not found, or the runner crashes at start', 'Install ICU (see Requirements) or run <data-dir>/runners/<name>/bin/installdependencies.sh with sudo.'],
   ['data-dir … is on a Windows mount', 'Use a Linux path: --data-dir ~/.local/share/ownci.'],
-  ['OwnCI is already set up for <repo> …; this data directory holds one runner', 'Use another --data-dir for a second repository.'],
-  ['… container belongs to another OwnCI data directory / container name … is in use', 'Another data directory has a runner of the same name. ownci uninstall --unregister, then ownci setup --repo … --name <unique>.'],
+  ['OwnCI is already set up for <repo> …; this data directory holds one runner', 'Use another --data-dir for a second repository (see Workflows → Several repositories).'],
+  ['… container belongs to another OwnCI data directory / container name … is in use (container-runner mode)', 'Another data directory has a runner of the same name. ownci uninstall --unregister, then ownci setup --repo … --name <unique>.'],
   ['… is a public repository', 'Use a private repository, or --allow-public-repo if you accept the risk.'],
   ['the GitHub token has no admin access', 'Use a token with admin access to the repository.'],
   ['no GitHub token found', 'export GITHUB_TOKEN=… or gh auth login.'],
   ['[FAIL] isolation in doctor', 'ownci start repairs the .env and hook; otherwise ownci setup --repo … --force.'],
   ['[WARN] isolation (image missing)', 'docker pull <image shown by doctor> (ownci start also pulls it).'],
   ['cleanup FAILED in a job log', 'Docker is unavailable or the image is missing. See <runner>/ownci/last-cleanup.json, fix Docker, run ownci doctor.'],
-  ['runner directory … goes through a symlink', 'Use the resolved path: --data-dir $(realpath <dir>).'],
-  ['image … cannot host the runner; it lacks: …', 'The --image misses tools the runner container needs. Use the default image or one derived from it.'],
-  ['the runner \'…\' could not be started (exit code 125)', 'Docker refused the runner container. Run ownci doctor, then docker pull <image>.'],
+  ['runner directory … goes through a symlink (container-runner mode)', 'Docker would mount the target under another name. Use the resolved path: --data-dir $(realpath <dir>).'],
+  ['image … cannot host the runner; it lacks: …', 'The --image misses tools the runner container needs (plain ubuntu:22.04 lacks the docker CLI and ICU). Use the default image, one derived from it, or one like e2e/images/ubuntu22.Dockerfile in the repository.'],
+  ['the runner \'…\' could not be started (exit code 125)', 'Docker refused the runner container (image missing, a mount refused). Run ownci doctor, then docker pull <image>.'],
   ['status phase registration_lost', 'The runner was removed on GitHub: ownci setup --repo … --force.'],
-  ['status phase version_deprecated', 'The runner could not self-update: upgrade ownci, then ownci setup --repo … --force.'],
+  ['status phase version_deprecated', 'The runner could not self-update: upgrade ownci, then ownci stop and ownci setup --force (it replaces a runner older than the one OwnCI pins).'],
   ['status phase duplicate_session', 'Another process uses this registration (another machine or a leftover process): stop it.'],
-  ['status phase crashed', 'Repeated crashes. Read ownci logs and run ownci doctor.'],
-  ['status says stopped (unexpectedly)', 'The supervisor was killed or the machine rebooted: ownci start recovers.'],
-  ['A job stays queued', 'Is the runner online (ownci status --remote)? Does the workflow say runs-on: [ownci]? Did WSL or the machine go to sleep?'],
+  ['status phase crashed', 'Repeated crashes. Read ownci logs (status shows the last line, status --json the last 20) and run ownci doctor.'],
+  ['status says stopped (unexpectedly)', 'The supervisor was killed or the machine rebooted: ownci start recovers (it also stops runner processes left over from the killed supervisor).'],
+  ['A job stays queued', 'Is the runner online (ownci status --remote)? Does the workflow say runs-on: [ownci], and do its other labels match the runner’s (ownci status)? Did WSL or the machine go to sleep?'],
   ['already running (pid N)', 'ownci status, then ownci stop.'],
 ]
 ---
 
 <DocsShell
   title="Troubleshooting"
-  description="Start with ownci doctor and ownci status. For logs: ownci logs, or ownci logs --source ownci -v."
+  description="Start with ownci doctor and ownci status. For logs: ownci logs, or ownci logs --source ownci. Add -v to a failing command to see its debug output."
 >
   <section class="docs-section" id="symptoms">
     <h2>Symptoms and fixes</h2>
-    <div class="table-wrap">
+    <div class="table-wrap" tabindex="0" role="region" aria-label="Symptoms and fixes">
       <table class="docs-table">
         <thead><tr><th scope="col">You see</th><th scope="col">Fix</th></tr></thead>
         <tbody>
@@ -49,7 +49,9 @@ const rows = [
     <h3>Known limitations</h3>
     <ul>
       <li>One job at a time per runner; use one data directory per repository.</li>
-      <li>The runner is a plain process: it stops when you stop it, when WSL shuts down or when the machine sleeps. Queued jobs wait until it reconnects.</li>
+      <li>Linux and WSL2 only. Tested end to end on WSL2 with Docker Desktop (amd64); native Linux and arm64 are built but not yet tested.</li>
+      <li>The runner is a plain process: it stops when you stop it, when WSL shuts down (the WSL VM can shut down by itself after your terminals close) or when the machine sleeps. Queued jobs wait until it reconnects. Use <code>ownci start --detach</code> and keep WSL running, for example by leaving a terminal open.</li>
+      <li>Container-runner mode starts the runner with <code>run.sh --once</code>, which the runner marks as deprecated. If a future runner drops it, OwnCI will report the runner as crashing.</li>
       <li>The runner updates itself, so the installed version can be newer than the one OwnCI pinned. <code>ownci status</code> shows the real one.</li>
       <li>No systemd service or auto-start on boot yet. OwnCI does not install Docker for you.</li>
     </ul>

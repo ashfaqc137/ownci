@@ -24,7 +24,7 @@ import (
 //   - .fake-job-request in the runner dir: "<job> [nocontainer]" → run.sh
 //     simulates one job, running ACTIONS_RUNNER_HOOK_JOB_COMPLETED if set.
 //   - FAKE_RUNNER_EXIT_CODE=N (env or .env): run.sh exits N after connecting.
-//   - OWNCI_DEV_GITHUB_API_URL: config.sh calls <url>/_fake/register (t05).
+//   - OWNCI_DEV_GITHUB_API_URL: config.sh calls <url>/_fake/register.
 //
 //go:embed fakerunner
 var fakeRunnerFS embed.FS

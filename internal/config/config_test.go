@@ -226,7 +226,7 @@ func TestLoadErrors(t *testing.T) {
 			if err == nil || errors.Is(err, ErrNotConfigured) {
 				t.Fatalf("err = %v", err)
 			}
-			if !strings.Contains(err.Error(), p.ConfigFile) || !strings.Contains(err.Error(), "setup --force") {
+			if !strings.Contains(err.Error(), p.ConfigFile) || !strings.Contains(err.Error(), "--force") {
 				t.Errorf("err should name path and hint: %v", err)
 			}
 		})
@@ -235,7 +235,7 @@ func TestLoadErrors(t *testing.T) {
 
 func TestModes(t *testing.T) {
 	p := ensured(t)
-	// A config written before t11 has no mode: it is host mode.
+	// A config written before container-runner mode has no mode: it is host mode.
 	if err := os.WriteFile(p.ConfigFile, []byte(`{"schemaVersion": 1, "runner": {"name": "x", "isolation": "docker-job-container"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

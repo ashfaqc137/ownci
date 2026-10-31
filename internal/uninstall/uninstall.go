@@ -75,7 +75,7 @@ type run struct {
 	sum        summary
 }
 
-// Run executes the uninstall flow (tasks/t09-uninstall-logs.md).
+// Run executes the uninstall flow.
 func Run(ctx context.Context, d Deps, o Options) error {
 	if d.Logger == nil {
 		d.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))

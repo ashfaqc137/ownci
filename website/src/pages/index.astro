@@ -39,7 +39,8 @@ jobs:
         <Code label="Install · Linux and WSL2" code={install} />
       </div>
 
-      <div class="run-demo" role="img" aria-label="Illustration: a pull request check is queued on GitHub, runs on your machine in a container, and passes; the workspace is then wiped.">
+      <figure class="run-demo">
+        <span class="sr-only">Illustration: a pull request check is queued on GitHub, runs on your machine in a container, and passes; the workspace is then wiped.</span>
         <div class="pr-card" aria-hidden="true">
           <div class="pr-head">
             <span class="pr-kicker">ACME/APP · PULL REQUEST</span>
@@ -66,8 +67,8 @@ jobs:
           <div class="terminal-chrome"><span class="chrome-dots"><i></i><i></i><i></i></span> ~/code/app</div>
           <pre class="terminal-body"><span class="t-cmd">ownci start --detach</span><span class="t-ok">✓ Runner 'ownci-mybox' is listening for jobs on acme/app (pid 48213). Stop with: ownci stop</span><span class="t-gap"></span><span class="t-note"># PR #42 pushed: GitHub queues "build" for runs-on: [ownci]</span><span class="t-note"># your runner takes the job and starts container node:22</span><span class="t-note"># checkout · npm ci · npm test</span><span class="t-pass"># job succeeded: the check turns green on the PR</span><span class="t-note"># _work wiped in a throwaway container, ready for the next job</span></pre>
         </div>
-        <p class="run-caption">Illustration · the first two lines are real OwnCI output</p>
-      </div>
+        <figcaption class="run-caption">Illustration · the command and its ✓ line are real OwnCI output</figcaption>
+      </figure>
     </section>
 
     <section class="split-section" aria-labelledby="problem-title">
@@ -105,7 +106,7 @@ jobs:
         <article class="card problem">
           <span class="card-number">02</span>
           <h3>Self-hosting is a chore</h3>
-          <p>Download, checksum, register, supervise, clean up, unregister: by hand, and again on every machine.</p>
+          <p>Download, checksum, register, supervise, clean up and unregister, all by hand and again on every machine.</p>
         </article>
         <article class="card problem">
           <span class="card-number">03</span>
@@ -141,7 +142,7 @@ jobs:
           <h3>With OwnCI</h3>
           <ul>
             <li><code>ownci setup</code> downloads the pinned runner and checks its SHA-256 before registering</li>
-            <li>Your GitHub token is never stored, and the registration token is single-use</li>
+            <li>Your GitHub token is never stored, and the short-lived registration token never appears on a command line</li>
             <li>A supervisor restarts the runner with backoff; <code>ownci stop</code> stops it cleanly</li>
             <li>Every job runs in a Docker container</li>
             <li>The workspace is wiped after every job, and a failed wipe fails the job visibly</li>
@@ -179,7 +180,7 @@ jobs:
         <Code label="workflow.yml" code={workflow} />
         <p>
           Workflows without a <code>container:</code> line can run unchanged in <a href={href('/docs/workflows/')}>container-runner mode</a>, and a team can share one workflow
-          so everyone’s jobs <a href={href('/docs/workflows/#team')}>run on their own machine</a>.
+          so everyone’s jobs <a href={href('/docs/workflows/#team')}>run on their own machine</a>, with <a href={href('/docs/workflows/#maintainer-control')}>maintainers deciding</a> which jobs reach which machine.
         </p>
       </div>
     </section>
@@ -194,7 +195,7 @@ jobs:
         <li><span class="mark yes" aria-hidden="true">✓</span><span><strong>Containers and a clean workspace for every job</strong>, re-checked every time the runner starts.</span></li>
         <li><span class="mark no" aria-hidden="true">!</span><span><strong>Not a sandbox for hostile code.</strong> The official runner mounts the Docker socket into job containers, so a job can control your Docker daemon. The container guards against accidents, not attacks.</span></li>
         <li><span class="mark no" aria-hidden="true">!</span><span><strong>Public repositories are refused by default</strong>, because pull requests from forks could run code on your machine.</span></li>
-        <li><span class="mark no" aria-hidden="true">!</span><span><strong>Early days:</strong> Linux and WSL2 only, one job at a time per runner, and no auto-start on boot yet.</span></li>
+        <li><span class="mark no" aria-hidden="true">!</span><span><strong>Early days:</strong> Linux and WSL2 only (tested end to end on WSL2 with Docker Desktop, amd64; native Linux and arm64 are built but not yet tested), one job at a time per runner, and no auto-start on boot yet.</span></li>
       </ul>
       <p class="callout warn"><strong>Read the trust model before you point OwnCI at anything you don’t control.</strong> <a href={href('/security/')}>What OwnCI enforces, and what it doesn’t →</a></p>
     </section>
