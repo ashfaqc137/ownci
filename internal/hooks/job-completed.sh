@@ -36,19 +36,22 @@ case "$root" in
 esac
 work="$root/_work"
 if [ -L "$work" ] || [ ! -d "$work" ]; then
-  echo "ownci: cleanup skipped: unexpected work dir"
-  exit 1
+  fail "unexpected work dir"
 fi
 [ -n "$image" ] || fail "no cleanup image configured"
 
 # Everything in _work goes except _temp and _PipelineMapping, which the runner
-# manages itself. _temp is handed back to the runner user because the job
-# container left root-owned files there.
+# manages itself, unless a job replaced them with symlinks (on the host those
+# would point elsewhere and the runner would empty their target). _temp is
+# handed back to the runner user because the job container left root-owned
+# files there. The pinned image is pulled if it is missing (e.g. after a
+# 'docker system prune -a'), so cleanup keeps working until the next start.
 script='set -eu
+for d in _temp _PipelineMapping; do if [ -L "/w/$d" ]; then rm -f "/w/$d"; fi; done
 find /w -mindepth 1 -maxdepth 1 ! -name _temp ! -name _PipelineMapping -exec rm -rf {} +
 if [ -d /w/_temp ]; then chown -R "$1:$2" /w/_temp; fi'
 
-if ! out="$(docker run --rm --pull never --network none --label ownci.managed=true \
+if ! out="$(docker run --rm --pull missing --network none --label ownci.managed=true \
   -v "$work:/w" "$image" sh -c "$script" sh "$(id -u)" "$(id -g)" 2>&1)"; then
   reason="${out##*$'\n'}"
   fail "${reason:-docker run failed}"

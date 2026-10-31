@@ -56,7 +56,7 @@ func TestDoctorDockerFailure(t *testing.T) {
 	if !strings.Contains(stdout, "[FAIL] docker") || !strings.Contains(stdout, "Hint: Enable WSL integration") || !strings.Contains(stdout, "1 failed") {
 		t.Errorf("stdout:\n%s", stdout)
 	}
-	if stderr != "" {
+	if strings.Contains(stderr, "Error") {
 		t.Errorf("exit-3 must not print an Error line: %q", stderr)
 	}
 }

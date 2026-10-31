@@ -351,6 +351,23 @@ func TestRunBeforeLaunchErrorEndsRun(t *testing.T) {
 	}
 }
 
+func TestRunStopDuringBeforeLaunch(t *testing.T) {
+	r := newRig(t)
+	o := r.opts()
+	entered := make(chan struct{})
+	o.BeforeLaunch = func(ctx context.Context) error {
+		close(entered)
+		<-ctx.Done() // a long image pull, cancelled by the stop
+		return ctx.Err()
+	}
+	run := r.start(o)
+	<-entered
+	run.sigs <- syscall.SIGINT
+	if res := run.wait(t); res.err != nil || res.st.Phase != PhaseStopped {
+		t.Errorf("result = %+v, want a clean stop", res)
+	}
+}
+
 func TestRunStopDuringBackoff(t *testing.T) {
 	r := newRig(t)
 	o := r.opts()

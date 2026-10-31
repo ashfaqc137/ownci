@@ -87,6 +87,8 @@ type githubStatus struct {
 	Busy    bool   `json:"busy"`
 	Error   string `json:"error,omitempty"`
 	Warning string `json:"warning,omitempty"`
+	// Visibility is the repository's visibility on GitHub ("" when unknown).
+	Visibility string `json:"visibility,omitempty"`
 }
 
 type containerStatus struct {
@@ -276,6 +278,14 @@ func remoteStatus(ctx context.Context, app *App, cfg *config.Config, rep *status
 	}
 	gh := github.NewClient(token, github.WithBaseURL(apiBaseURL()), github.WithHTTPClient(newHTTPClient()),
 		github.WithLogger(app.Logger), github.WithTokenSource(src))
+	if info, err := gh.GetRepo(ctx, repo); err == nil {
+		gs.Visibility = info.Visibility
+		if !info.Private && !cfg.Runner.AllowPublicRepo {
+			defer func() {
+				gs.Warning = joinWarnings(gs.Warning, repo.String()+" is now public: pull requests from forks could run code on this machine, and 'ownci start' will refuse to run")
+			}()
+		}
+	}
 	found, err := gh.FindRunner(ctx, repo, cfg.Runner.Name)
 	gs.Checked = true
 	if err != nil {
@@ -297,6 +307,13 @@ func remoteStatus(ctx context.Context, app *App, cfg *config.Config, rep *status
 	return gs
 }
 
+func joinWarnings(a, b string) string {
+	if a == "" {
+		return b
+	}
+	return a + "; " + b
+}
+
 func anyRunnerDir(p config.Paths) bool {
 	entries, err := os.ReadDir(p.RunnersDir)
 	return err == nil && len(entries) > 0
@@ -310,7 +327,7 @@ func renderStatus(w io.Writer, r *statusReport) {
 		switch {
 		case r.ConfigError != "":
 			row("Configured", "no (config unreadable: %s)", r.ConfigError)
-			fmt.Fprintln(w, "Hint: re-run 'ownci setup --force' to recreate the configuration.")
+			fmt.Fprintln(w, "Hint: re-run 'ownci setup --repo <owner/name> --force' to recreate the configuration.")
 		default:
 			row("Configured", "no")
 			fmt.Fprintln(w, "Hint: run 'ownci setup --repo owner/name' to set up a runner.")

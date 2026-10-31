@@ -49,7 +49,8 @@ container that jobs without `container:` use as their image
   - *Native Linux / Docker Engine in WSL:* [install Docker Engine](https://docs.docker.com/engine/install/)
     and add yourself to the `docker` group (`sudo usermod -aG docker $USER`, then log in again).
 - **ICU** for the runner: Debian/Ubuntu `sudo apt-get install -y libicu-dev`,
-  Fedora `sudo dnf install libicu`. (`bin/installdependencies.sh` in the runner directory does the same.)
+  Fedora `sudo dnf install libicu`, openSUSE `sudo zypper install libicu`.
+  (`bin/installdependencies.sh` in the runner directory does the same.)
 - A **GitHub token with admin access to the repository**, only for `setup`,
   `uninstall --unregister` and `status --remote`. In order of preference: `GITHUB_TOKEN`,
   `GH_TOKEN`, or `gh auth login` (the default scopes work for repositories you administer).
@@ -111,10 +112,11 @@ Stop contributing compute with `ownci stop`; `ownci start` brings the same regis
 ### Run every job in a container (no `container:` needed)
 
 Workflows written for GitHub-hosted runners usually have no `container:` line. With
-**container-runner mode** they run unchanged:
+**container-runner mode** they run unchanged (to switch an existing runner: `ownci stop`, then
+`ownci setup --force --mode container-runner`):
 
 ```bash
-ownci setup --repo owner/name --mode container-runner    # or: --force --mode container-runner to switch
+ownci setup --repo owner/name --mode container-runner
 ownci start --detach
 ```
 
@@ -163,17 +165,17 @@ How it works:
 
 ### One workflow file for a whole team
 
-Give each developer's runner their own label (their GitHub username) and let the workflow
-pick the runner of whoever triggered it, so everyone's jobs run on their own machine:
+Give each developer's runner their own label (`dev-` plus their GitHub username) and let the
+workflow pick the runner of whoever triggered it, so everyone's jobs run on their own machine:
 
 ```bash
-ownci setup --repo owner/name --labels <your-github-username>   # each developer, once
+ownci setup --repo owner/name --labels dev-<your-github-username>   # each developer, once
 ```
 
 ```yaml
 jobs:
   build:
-    runs-on: [ownci, "${{ github.actor }}"]   # the user who opened or pushed to the PR
+    runs-on: [ownci, "dev-${{ github.actor }}"]   # the user who opened or pushed to the PR
     container: node:22
     steps:
       - uses: actions/checkout@v4
@@ -185,6 +187,68 @@ runner, it never lands on someone else's); bots such as Dependabot match no runn
 developer needs admin access to the repository to run `ownci setup`. Use
 `github.event.pull_request.user.login` instead of `github.actor` if you want the PR *author*
 rather than whoever pushed last.
+
+Keep the `dev-` prefix. Labels are case-insensitive, and without a prefix a username can
+equal another runner label: a real GitHub account called `ownci` exists, and its jobs would
+become `runs-on: [ownci, ownci]`, which every OwnCI runner on the repository matches.
+
+The label routes jobs; it does not restrict who can reach a runner. Anyone who can change the
+workflow can point `runs-on` at another developer's label. To let only maintainers decide,
+see the next section.
+
+### Let only maintainers decide where jobs run
+
+With `on: pull_request`, GitHub runs the workflow file from the PR, so a PR can change
+`runs-on` to any developer's label. And anyone with write access can push a branch with a
+workflow of its own (`on: push`) that targets any runner on the repository. If maintainers
+should have full control over which jobs reach which machine:
+
+1. **Run CI from `main`'s workflow file with `pull_request_target`.** It always uses the
+   workflow from the base branch, so a PR cannot change `runs-on`; it still tests the PR's code.
+
+   ```yaml
+   # .github/workflows/ci.yml, on main
+   on:
+     pull_request_target:
+       branches: [main]
+   permissions:
+     contents: read             # pull_request_target can otherwise get a write token
+   jobs:
+     build:
+       runs-on: [ownci, "dev-${{ github.event.pull_request.user.login }}"]   # the PR author's machine
+       container: node:22
+       steps:
+         - uses: actions/checkout@v4
+           with:
+             ref: ${{ github.event.pull_request.head.sha }}   # the PR's code, not main's
+             persist-credentials: false
+         - run: npm ci && npm run build
+   ```
+
+2. **Protect the workflow files on `main`.** Require pull request reviews on `main` (branch
+   protection or a branch ruleset) with *Require review from Code Owners*, and a `CODEOWNERS`
+   entry such as `/.github/workflows/ @owner/maintainers`.
+
+3. **Block workflow changes on every other branch.** A push ruleset with *Restrict file paths*
+   set to `.github/workflows/**`, with maintainers on the bypass list, stops anyone from pushing
+   a branch whose own workflow targets a runner. Push rulesets need GitHub Team or Enterprise
+   and a private or internal repository. Without step 3, anyone with write access can still
+   reach every runner on the repository.
+
+Things to know:
+
+- **Don't use secrets or caches in this workflow.** The PR's code runs in the same job, so
+  anything the job can read, the PR can read, and a cache it saves is visible to `main`'s
+  workflows.
+- **`pull_request_target` ignores the fork pull request approval setting:** it always runs.
+  Keep the author's `dev-` label in `runs-on`; a contributor without a runner of their own gets
+  a job that waits in the queue and reaches no one's machine. Never combine this trigger with
+  `runs-on: [ownci]` alone.
+- **Maintainers decide where a job runs, not what it runs.** The PR's scripts (`npm ci`, its
+  tests) still run on the author's machine. Anyone with write access who pushes to someone
+  else's PR branch runs their code on that author's machine.
+- A PR that changes CI is tested with `main`'s workflow; the change applies once it is merged,
+  and then reaches every developer's machine. Review workflow changes like code.
 
 ### Several repositories
 
@@ -199,8 +263,8 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
 ```
 
 - Every later command (`status`, `logs`, `stop`, `uninstall`) needs the same `--data-dir`,
-  or `export OWNCI_DATA_DIR=…` in that shell. Without one it acts on the default
-  `~/.local/share/ownci`.
+  or `export OWNCI_DATA_DIR=…` in that shell. Without one it acts on the default data
+  directory.
 - **Container-runner mode needs distinct names:** the runner container is called
   `ownci-<runner name>`, and Docker container names are global. OwnCI refuses a name whose
   container belongs to another data directory and never stops or removes such a container.
@@ -213,12 +277,12 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
 | Command | What it does |
 |---|---|
 | `ownci version [--json]` | OwnCI version, commit, date, and the runner version when set up. |
-| `ownci doctor [--json]` | Read-only health checks (platform, user, data dir, ICU, Docker, isolation). Exit 3 if one fails. |
-| `ownci setup --repo owner/name` | Download and verify the pinned runner, register it with label `ownci` only, install the isolation settings and cleanup hook. Flags: `--name`, `--labels a,b` (default: keep the current ones), `--mode host\|container-runner` (default: keep the current mode, or host), `--image` (container-runner mode), `--force` (re-register in place, also to switch modes; refused while the runner runs), `--allow-public-repo`, `--dry-run`, `--download-only`. |
-| `ownci start [--detach]` | Re-asserts isolation, cleans leftovers, starts the runner under supervision (restarts on crashes with backoff; in container-runner mode a fresh container per job). `--wait` sets how long `--detach` waits for "listening"; `--image` overrides the runner image for this session (container-runner mode). |
-| `ownci stop [--force]` | Gracefully stops the runner (a running job is cancelled); registration and files are kept. `--timeout` (default 45 s). |
+| `ownci doctor [--json]` | Health checks (platform, user, data dir, ICU, Docker, isolation); changes nothing except creating the data directory if it is missing. Exit 3 if one fails. |
+| `ownci setup --repo owner/name` | Download and verify the pinned runner, register it with the label `ownci` plus any `--labels` (never GitHub's default labels), install the isolation settings and cleanup hook. `--repo` takes `owner/name` or the repository URL; once set up, it defaults to the configured repository. Flags: `--name`, `--labels a,b` (up to 10 extra labels from `A-Za-z0-9._-`; GitHub's default labels (`self-hosted`, `linux`, `x64`, …) and hosted-runner labels (`ubuntu-*`, `windows-*`, `macos-*`) are refused; default: keep the current ones), `--mode host\|container-runner` (default: keep the current mode, or host), `--image` (container-runner mode), `--force` (re-register in place, also to switch modes or to replace a runner that could not self-update; refused while the runner runs), `--allow-public-repo`, `--dry-run`, `--download-only`. |
+| `ownci start [--detach]` | Re-asserts isolation, cleans leftovers, starts the runner under supervision (restarts on crashes with backoff; in container-runner mode a fresh container per job). `--wait` sets how long `--detach` waits for "listening" (default 60 s); `--image` overrides the runner image for this session (container-runner mode). |
+| `ownci stop [--force]` | Gracefully stops the runner (a running job is cancelled); registration and files are kept. `--timeout` (default 45 s, 75 s in container-runner mode); `--force` kills the runner if it has not stopped by then. |
 | `ownci status [--remote] [--json]` | What is *actually* true: installed, registered, mode (and the runner container's state), process (from a held lock, never from files), runner state, last job, isolation, Docker, last error. `--remote` also asks GitHub. |
-| `ownci logs [--source runner\|ownci\|supervisor\|diag] [-n N] [-f]` | Tail OwnCI's and the runner's logs (secrets are redacted). |
+| `ownci logs [--source runner\|ownci\|supervisor\|diag] [-n N] [-f]` | Tail OwnCI's and the runner's logs (secrets are redacted). Defaults: `--source runner`, `-n 100`. |
 | `ownci uninstall [--unregister] [--purge] [--local-only] [--yes] [--name n]` | Stop the runner; optionally remove the GitHub registration and OwnCI's files. Without flags it only stops and explains what is left. With no runner set up, `--purge` still removes the data directory. The `ownci` binary is never deleted; after a purge the summary prints the `rm` command. |
 
 Global flags: `--data-dir`, `-v/--verbose`.
@@ -231,8 +295,16 @@ it at anything you do not control.
 **Supported:** *private* repositories whose workflows you trust (your own, your team's).
 `ownci setup` **refuses public repositories** unless you pass `--allow-public-repo`, because
 pull requests from forks can run arbitrary code on a self-hosted runner. If you accept that
-risk, set the repository's *Fork pull request workflows from outside collaborators* to
-*Require approval for all outside collaborators*.
+risk, set the repository's *Approval for running fork pull request workflows from contributors*
+to *Require approval for all external contributors* (Settings → Actions → General), and read
+each pull request, including its changes to `.github/workflows/`, before you approve its run:
+approving runs that code on your machine. `setup` records that you accepted a public
+repository; otherwise `ownci start` checks the visibility again (when a token is available)
+and refuses to run if the repository has become public since.
+
+In a team, the per-developer label routes jobs but does not restrict who can reach a runner.
+To let only maintainers decide which jobs reach which machine, see
+[Let only maintainers decide where jobs run](#let-only-maintainers-decide-where-jobs-run).
 
 **What OwnCI enforces and checks (every `start`, and in `status` / `doctor`):**
 
@@ -242,17 +314,24 @@ risk, set the repository's *Fork pull request workflows from outside collaborato
 - Container-runner mode: the runner is only ever started inside its container, so a job
   without `container:` runs there, never directly on your machine. The container is
   replaced after every job, and the cleanup hook is mounted read-only into it so a job
-  cannot switch the workspace wipe off.
+  cannot disable the wipe by editing the hook (a hostile job can still change the runner's
+  other files; see item 7 below).
 - After every job the runner's `_work` directory (workspace, `_actions`, `_tool`) is wiped
   by a hook that uses a throwaway, network-less container from a digest-pinned image, so
   root-owned files cannot carry over to the next job. If the cleanup fails, the **job
   fails visibly** rather than silently leaving files behind.
-- The runner is opt-in: it carries only the label `ownci`, so a stray `runs-on: self-hosted`
-  never lands on your laptop.
+- The runner is opt-in: it carries the label `ownci` (plus any `--labels` you add) and none of
+  GitHub's default or hosted-runner labels, so a stray `runs-on: self-hosted` or
+  `runs-on: ubuntu-latest` never lands on your laptop.
+- A repository that became public after `setup` is refused at `start` (checked when a GitHub
+  token is available) and flagged by `status --remote`.
 - OwnCI uses no privileged containers.
-- Your GitHub token is never stored; the registration token is single-use. The runner's own
-  credentials live in the runner directory inside the data dir (directories `0700`, secrets
-  `0600`). Tokens are redacted from OwnCI's logs and the runner log it captures.
+- Your GitHub token is never stored. The registration token is short-lived and reaches the
+  runner through its environment, not its command line. The runner's own credentials live in
+  its directory under `runners/`, which is `0700` like the rest of the data directory; OwnCI's
+  own files are `0600`. `GITHUB_TOKEN` and `GH_TOKEN` are removed from the runner's
+  environment, so jobs never inherit them. Tokens are redacted from OwnCI's logs and the
+  runner log it captures.
 
 **What the container boundary does *not* protect against** (a container is not a security
 sandbox for hostile code):
@@ -261,8 +340,10 @@ sandbox for hostile code):
    `/var/run/docker.sock` into every job container (checked on runner 2.338.0: it is present
    and the job runs as root). A job can therefore control your Docker daemon, which is
    effectively root on the machine that runs it: start privileged containers, mount host
-   paths, read other containers' data. For OwnCI this means the container is **not** a
+   paths (with Docker Desktop, your WSL distro's files and Windows drives too), read other
+   containers' data. For OwnCI this means the container is **not** a
    barrier against a malicious workflow, only against accidents. Only run workflows you trust.
+   (Dropping the socket is tracked in [#6](https://github.com/ashfaqc137/ownci/issues/6).)
 1. **Network:** job containers use Docker's default network and can reach the internet and
    your LAN. OwnCI sets no network policy.
 2. **Sibling containers:** `services:`, `uses: docker://…` and Dockerfile actions run as
@@ -280,7 +361,8 @@ sandbox for hostile code):
    job without `container:` runs as your user next to the runner's files, including its
    registration credentials (`.credentials*`), and can read or change them for the length of
    that job. With the Docker socket (item 0) it can reach anything on the machine anyway; the
-   mode protects against accidents and leftovers, not against hostile workflows.
+   mode protects against accidents and leftovers, not against hostile workflows
+   ([#8](https://github.com/ashfaqc137/ownci/issues/8)).
 
 OwnCI does **not** claim to safely run arbitrary untrusted pull request code.
 
@@ -290,19 +372,20 @@ OwnCI does **not** claim to safely run arbitrary untrusted pull request code.
   see [Several repositories](#several-repositories)).
 - Container-runner mode starts the runner with `run.sh --once`, which the runner marks as
   deprecated in favor of ephemeral registrations. If a future runner drops it, OwnCI will
-  report the runner as crashing; see [`tasks/future.md`](tasks/future.md).
+  report the runner as crashing ([#7](https://github.com/ashfaqc137/ownci/issues/7)).
 - The runner is a plain process: it stops when you stop it, when WSL shuts down (the WSL VM
   can idle-shut-down after your terminals close) or when the machine sleeps. Queued jobs wait
   until it reconnects. Use `ownci start --detach` and keep WSL running (e.g. leave a terminal open).
 - The runner self-updates (GitHub refuses jobs to runners that fall too far behind), so the
   installed version can be newer than the one OwnCI pinned. `ownci status` shows the real one.
-- Linux and WSL2 only; no systemd service and no auto-start on boot yet.
+- Linux and WSL2 only ([#9](https://github.com/ashfaqc137/ownci/issues/9)); no systemd service and no auto-start on boot yet.
 - Docker Desktop's WSL integration or a Docker Engine in WSL must be set up by you; OwnCI does
   not install Docker.
 
 ## Troubleshooting
 
-Start with `ownci doctor` and `ownci status`. Logs: `ownci logs`, `ownci logs --source ownci -v`.
+Start with `ownci doctor` and `ownci status`. Logs: `ownci logs`, `ownci logs --source ownci`.
+Add `-v` to the failing command to see its debug output live.
 
 | Symptom | Fix |
 |---|---|
@@ -322,14 +405,14 @@ Start with `ownci doctor` and `ownci status`. Logs: `ownci logs`, `ownci logs --
 | `[WARN] isolation` (image missing) | `docker pull <image shown by doctor>` (`ownci start` also pulls it). |
 | `cleanup FAILED` in a job log | Docker unavailable or the image missing; see `<runner>/ownci/last-cleanup.json`, fix Docker, `ownci doctor`. |
 | `runner directory … goes through a symlink` (container-runner mode) | Docker would mount the target under another name. Use the resolved path: `--data-dir $(realpath <dir>)`. |
-| `image … cannot host the runner; it lacks: …` | The `--image` misses tools the runner container needs (plain `ubuntu:22.04` lacks the docker CLI and ICU); use the default image, one derived from it, or one like `e2e/images/ubuntu22.Dockerfile`. |
+| `image … cannot host the runner; it lacks: …` | The `--image` misses tools the runner container needs (plain `ubuntu:22.04` lacks the docker CLI and ICU); use the default image, one derived from it, or one like [`e2e/images/ubuntu22.Dockerfile`](e2e/images/ubuntu22.Dockerfile). |
 | `the runner '…' could not be started (exit code 125)` | Docker refused the runner container (image missing, a mount refused). `ownci doctor`, then `docker pull <image>`. |
 | status phase **`registration_lost`** | The runner was removed on GitHub: `ownci setup --repo … --force` to register again. |
-| status phase **`version_deprecated`** | The runner could not self-update: upgrade ownci, then `ownci setup --repo … --force`. |
+| status phase **`version_deprecated`** | The runner could not self-update: upgrade ownci, then `ownci stop` and `ownci setup --force` (it replaces a runner older than the one OwnCI pins). |
 | status phase **`duplicate_session`** | Another process uses this registration (another machine or a leftover process): stop it. |
-| status phase **`crashed`** | Repeated crashes; read `ownci logs` (the last 20 lines are in `status`), run `ownci doctor`. |
+| status phase **`crashed`** | Repeated crashes; read `ownci logs` (`status` shows the last line, `status --json` the last 20), run `ownci doctor`. |
 | status says *stopped (unexpectedly)* | The supervisor was killed or the machine rebooted: `ownci start` recovers (it also stops runner processes left over from the killed supervisor, which would otherwise hold the GitHub session). |
-| A job stays queued | Is the runner online (`ownci status --remote`)? Does the workflow have `runs-on: [ownci]`? Did WSL or the machine sleep? |
+| A job stays queued | Is the runner online (`ownci status --remote`)? Does the workflow have `runs-on: [ownci]`, and do its other labels match the runner's (`ownci status`)? Did WSL or the machine sleep? |
 | `already running (pid N)` | `ownci status`, then `ownci stop`. |
 
 ## Development
@@ -352,9 +435,7 @@ eval "$(go run ./tools/fakegh --print-env)"
 ./bin/ownci-dev --data-dir /tmp/ownci-dev setup --repo me/demo && ./bin/ownci-dev --data-dir /tmp/ownci-dev start --detach
 ```
 
-The real end-to-end check against GitHub is [`docs/e2e.md`](docs/e2e.md). The design decisions
-are recorded in [`tasks/00-context.md`](tasks/00-context.md) and the product requirements in
-[`plan.md`](plan.md).
+The real end-to-end check against GitHub is [`docs/e2e.md`](docs/e2e.md).
 
 ## License
 

@@ -63,7 +63,7 @@ func TestResolveTokenNothingFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := ResolveToken(context.Background(), env(nil), mk())
 			var ge *Error
-			if !errors.As(err, &ge) || !strings.Contains(ge.UserHint(), "set GITHUB_TOKEN") || !strings.Contains(ge.UserHint(), "gh auth login") {
+			if !errors.As(err, &ge) || !strings.Contains(ge.UserHint(), "Set GITHUB_TOKEN") || !strings.Contains(ge.UserHint(), "gh auth login") {
 				t.Fatalf("err = %v", err)
 			}
 		})

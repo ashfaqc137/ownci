@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/github"
 	"github.com/ashfaqc137/ownci/internal/runner"
 	"github.com/ashfaqc137/ownci/internal/setup"
@@ -25,21 +26,30 @@ func newSetupCmd() *cobra.Command {
 		Long: `Set this machine up as a GitHub Actions runner for one repository.
 
 Downloads and verifies the official runner, registers it with the label
-'ownci' only (workflows use 'runs-on: [ownci]'), and saves OwnCI's config.
+'ownci' plus any --labels and none of GitHub's default labels (workflows use
+'runs-on: [ownci]'), and saves OwnCI's config.
 
 --mode host (default) runs the runner on this machine and rejects jobs that
 do not declare 'container:'. --mode container-runner runs the runner inside a
 container, so jobs without 'container:' run in that container's image and jobs
 with one still use their own.
+
 Needs a token with admin access to the repository: $GITHUB_TOKEN, $GH_TOKEN
 or 'gh auth login'. The token is never stored.`,
-		Args: cobra.ArbitraryArgs,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if downloadOnly {
 				return runDownloadOnly(cmd, o.Name, o.Force)
 			}
 			if cmd.Flags().Changed("labels") && o.Labels == nil {
 				o.Labels = []string{} // --labels "": drop the extra labels
+			}
+			if o.Repo == "" {
+				// Re-running setup (--force, a mode switch) serves the
+				// repository already set up in this data directory.
+				if cfg, err := config.Load(appFrom(cmd).Paths); err == nil {
+					o.Repo = cfg.Runner.Repo
+				}
 			}
 			if o.Repo == "" {
 				return &UserError{
@@ -52,14 +62,14 @@ or 'gh auth login'. The token is never stored.`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.Repo, "repo", "", "repository to serve: owner/name or its GitHub URL")
+	f.StringVar(&o.Repo, "repo", "", "repository to serve: owner/name or its GitHub URL (default: the one already set up here)")
 	f.StringVar(&o.Name, "name", "", "runner name (default: ownci-<hostname>)")
 	f.StringSliceVar(&o.Labels, "labels", nil, "extra runner labels, comma-separated (the label 'ownci' is always added; default: keep the current ones)")
 	f.BoolVar(&o.Force, "force", false, "re-register an existing runner in place, or replace an unregistered runner directory")
 	f.BoolVar(&o.AllowPublicRepo, "allow-public-repo", false, "allow a public repository (fork PRs can run code on this machine)")
 	f.BoolVar(&o.DryRun, "dry-run", false, "show what would be done without changing anything")
 	f.BoolVar(&downloadOnly, "download-only", false, "download, verify and extract the runner without registering it")
-	f.StringVar(&o.Mode, "mode", "", "execution mode: 'host' (jobs must declare container:) or 'container-runner' (the runner runs in a container, which is the image of jobs without container:); default: keep the current mode, or host")
+	f.StringVar(&o.Mode, "mode", "", "execution mode: 'host' (jobs must declare container:) or 'container-runner' (the runner runs in a container; jobs without container: run in its image); default: keep the current mode, or host")
 	f.StringVar(&o.Image, "image", "", "container-runner mode: the runner image (default: the pinned official runner image)")
 	f.BoolVar(&o.SkipDockerCheck, "skip-docker-check", false, "skip the Docker preflight check (debugging only)")
 	_ = f.MarkHidden("skip-docker-check")

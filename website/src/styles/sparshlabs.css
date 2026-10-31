@@ -24,7 +24,7 @@
   --text-soft: #c4c5ba;
   --text-body: #a8aa9f;
   --text-muted: #8d8f84;
-  --text-faint: #74786b;
+  --text-faint: #828679; /* 5.0:1 on --bg, 4.56:1 on --surface-2 (WCAG AA) */
   --emph: #93b5ae;
 
   --line: rgba(245, 241, 234, 0.12);
@@ -93,6 +93,7 @@ body {
 
 a, button { font: inherit; color: inherit; }
 a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.code-block pre:focus-visible, .table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .skip-link { position: absolute; top: -40px; left: 16px; z-index: 10; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 700; text-decoration: none; }
 .skip-link:focus { top: 12px; }

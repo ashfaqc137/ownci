@@ -155,7 +155,7 @@ func IsolationCheck(r execx.Runner, runnerDir string, p isolation.Policy) Check 
 	}}
 }
 
-// RunnerContainerCheck verifies what container-runner mode needs (D13): a
+// RunnerContainerCheck verifies what container-runner mode needs: a
 // runner directory Docker can mount at the same path, and a runner image that
 // is present and has the runner's dependencies.
 func RunnerContainerCheck(r execx.Runner, runnerDir, image string) Check {

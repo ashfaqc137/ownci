@@ -2,6 +2,6 @@
 
 package github
 
-// Release builds do not compile in the dev overrides (D8).
+// Release builds do not compile in the dev overrides.
 func devAPIURL() string { return "" }
 func devWebURL() string { return "" }

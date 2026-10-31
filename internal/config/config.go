@@ -21,14 +21,14 @@ type Config struct {
 	Runner        *RunnerConfig `json:"runner,omitempty"`
 }
 
-// Execution modes (D1, D13). An empty Mode in config.json is host mode, so
-// configs written before t11 keep working.
+// Execution modes. An empty Mode in config.json is host mode, so
+// configs written before container-runner mode keep working.
 const (
 	ModeHost            = "host"             // runner on the host, jobs must declare container:
-	ModeContainerRunner = "container-runner" // runner in a container, which is the default job image
+	ModeContainerRunner = "container-runner" // runner in a container; jobs without container: run in its image
 )
 
-// RunnerConfig describes the registered runner (filled by setup, t06).
+// RunnerConfig describes the registered runner (filled by setup).
 type RunnerConfig struct {
 	Name             string    `json:"name"`
 	Provider         string    `json:"provider"`
@@ -38,11 +38,12 @@ type RunnerConfig struct {
 	InstalledVersion string    `json:"installedVersion"`
 	Isolation        string    `json:"isolation"`
 	Mode             string    `json:"mode,omitempty"`
-	Image            string    `json:"image,omitempty"` // runner image (container-runner mode)
+	Image            string    `json:"image,omitempty"`           // runner image (container-runner mode)
+	AllowPublicRepo  bool      `json:"allowPublicRepo,omitempty"` // setup accepted a public repository
 	CreatedAt        time.Time `json:"createdAt"`
 }
 
-// EffectiveMode is Mode with the pre-t11 default applied.
+// EffectiveMode is Mode with the default of configs written before container-runner mode applied.
 func (r *RunnerConfig) EffectiveMode() string {
 	if r.Mode == "" {
 		return ModeHost
@@ -53,7 +54,7 @@ func (r *RunnerConfig) EffectiveMode() string {
 // ValidMode reports whether m names a supported execution mode.
 func ValidMode(m string) bool { return m == ModeHost || m == ModeContainerRunner }
 
-const resetHint = "re-run 'ownci setup --force' to recreate it"
+const resetHint = "re-run 'ownci setup --repo <owner/name> --force' to recreate it"
 
 // Load reads the config. It returns ErrNotConfigured when the file is missing
 // or has no runner.

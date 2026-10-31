@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/execx"
 	"github.com/ashfaqc137/ownci/internal/runner"
 	"github.com/ashfaqc137/ownci/internal/testutil"
@@ -123,9 +124,24 @@ func TestSetupUsageErrors(t *testing.T) {
 	}
 }
 
+func TestSetupRepoDefaultsToConfigured(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	paths := config.NewPaths(dataDir)
+	if err := paths.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(paths, &config.Config{Runner: &config.RunnerConfig{Name: "ownci-box", Repo: "me/demo"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, _ := runCLI(t, "--data-dir", dataDir, "setup", "--force")
+	if strings.Contains(stderr, "--repo is required") {
+		t.Fatalf("setup without --repo should use the configured repository: %q", stderr)
+	}
+}
+
 func TestSetupInvalidRepo(t *testing.T) {
 	_, stderr, code := runCLI(t, "setup", "--repo", "not a repo")
-	if code != 1 || !strings.Contains(stderr, "invalid repository") || !strings.Contains(stderr, "owner/name") {
+	if code != 2 || !strings.Contains(stderr, "invalid repository") || !strings.Contains(stderr, "owner/name") {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
 }

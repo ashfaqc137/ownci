@@ -11,6 +11,7 @@ import (
 
 	"github.com/ashfaqc137/ownci/internal/config"
 	"github.com/ashfaqc137/ownci/internal/docker"
+	"github.com/ashfaqc137/ownci/internal/github"
 	"github.com/ashfaqc137/ownci/internal/runner"
 	"github.com/ashfaqc137/ownci/internal/supervisor"
 	"github.com/spf13/cobra"
@@ -105,7 +106,44 @@ func checkStartPreconditions(ctx context.Context, app *App) (*config.Config, err
 	if running {
 		return nil, alreadyRunningError(info)
 	}
+	if err := checkVisibility(ctx, app, cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// checkVisibility refuses to start for a repository that has become public
+// since setup, unless setup accepted a public repository. Without a token, or
+// when GitHub cannot be reached, it only logs: start must work offline.
+func checkVisibility(ctx context.Context, app *App, cfg *config.Config) error {
+	if cfg.Runner.AllowPublicRepo {
+		return nil
+	}
+	repo, err := github.ParseRepo(cfg.Runner.Repo)
+	if err != nil {
+		return nil
+	}
+	token, src, err := github.ResolveToken(ctx, os.Getenv, newExecRunner(app.Logger))
+	if err != nil {
+		app.Logger.Debug("repository visibility not checked: no GitHub token")
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	gh := github.NewClient(token, github.WithBaseURL(apiBaseURL()), github.WithHTTPClient(newHTTPClient()),
+		github.WithLogger(app.Logger), github.WithTokenSource(src))
+	info, err := gh.GetRepo(ctx, repo)
+	if err != nil {
+		app.Logger.Warn("could not check the repository's visibility", "repo", repo.String(), "err", err)
+		return nil
+	}
+	if !info.Private {
+		return &UserError{
+			Msg:  fmt.Sprintf("%s is now a public repository: pull requests from forks could run arbitrary code on this machine", repo),
+			Hint: "Make the repository private again, or accept the risk with 'ownci setup --force --allow-public-repo' (read the README's security section first).",
+		}
+	}
+	return nil
 }
 
 // startDetached re-executes ownci as a background supervisor and waits until
@@ -127,7 +165,8 @@ func startDetached(ctx context.Context, app *App, cfg *config.Config, wait time.
 		args = append(args, "--image", image)
 	}
 	child := exec.Command(exe, args...)
-	child.Stdout, child.Stderr = supLog, supLog // Stdin nil = /dev/null
+	child.Env = supervisor.WithoutTokens(os.Environ()) // the supervisor needs no token
+	child.Stdout, child.Stderr = supLog, supLog        // Stdin nil = /dev/null
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := child.Start(); err != nil {
 		return fmt.Errorf("starting the background supervisor: %w", err)

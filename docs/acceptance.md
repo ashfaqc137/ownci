@@ -1,10 +1,10 @@
 # Acceptance record (MVP)
 
-> A working copy of PRD §12 (`plan.md` is not edited). Tick an item **only** with evidence from running
+> The MVP acceptance checklist. Tick an item **only** with evidence from running
 > [`e2e.md`](e2e.md) against real GitHub: a run URL, a log excerpt or a screenshot path, with the date.
 >
 > **Status: EXECUTED 2026-10-22 for v0.1.0 — all items pass on WSL2 + Docker Desktop (amd64).**
-> Run by the implementing LLM with the **release binary** (`make release VERSION=v0.1.0`, the amd64
+> Run with the **release binary** (`make release VERSION=v0.1.0`, the amd64
 > archive) on private `ashfaqc137/blog`, throwaway PR #6 (closed, branch deleted). The workflows were the
 > `e2e/workflows/` files with `pull_request` triggers and an extra label, so the sandbox's default branch
 > was not touched. Native Linux (Docker Engine) and arm64 are **not** covered by this record.
@@ -18,7 +18,7 @@
 | Runner version (pinned → actual) | 2.338.0 → 2.338.0 (no self-update offered) |
 | Sandbox repository | `ashfaqc137/blog` (private), PR #6; step 4 against public `ashfaqc137/ownci` |
 
-## Checklist (from PRD §12)
+## Checklist
 
 ### CLI and installation
 
@@ -77,16 +77,16 @@
 
 | Step | Expected | Actual | Impact / follow-up |
 |---|---|---|---|
-| 8 | The hook runs after the job container stops (D10 risk) | Container removed 15:06:03.6Z (*Stop containers*), `ownci: workspace cleaned` 15:06:04.3Z (*Complete runner*) | None; same as 2026-10-15 |
+| 8 | The hook runs after the job container stops | Container removed 15:06:03.6Z (*Stop containers*), `ownci: workspace cleaned` 15:06:04.3Z (*Complete runner*) | None; same as 2026-10-15 |
 | 8 | Wiping `_work` does not break the runner | `second` started fine after the wipe; later runs green | None |
 | 5/9 | The runner version is the pinned one | 2.338.0 pinned = actual | Self-update not exercised (no newer release) |
 | 10 | The runner process after `kill -9` of the supervisor | One runner process survived the kill; after `start` there was again exactly one (the new one). The old listener's GitHub session stayed open: the new listener logged `A session for this runner already exists … Conflict. Retrying until reconnected.` and was online ~70 s later without intervention | Documented as a known limitation; `status` keeps showing that line as *Last error* after recovery |
 | C2 | Run status follows its jobs | `ctr-pass`: the only job completed `success` at 15:16:05Z, the run still showed `in_progress` on GitHub afterwards | GitHub-side roll-up delay; not an OwnCI issue |
 | — | Several repositories side by side | Two data dirs, host + container-runner, ran jobs concurrently; same-name collision refusals verified with real Docker and the fake GitHub (commit `1a059c0`) | Second instance used the same sandbox repo under another name, not a second repository |
 
-## t11: container-runner mode (executed 2026-10-22)
+## Container-runner mode (executed 2026-10-22)
 
-Run by the implementing LLM on private `ashfaqc137/blog`, throwaway PR #4 (closed, branch deleted).
+Run on private `ashfaqc137/blog`, throwaway PR #4 (closed, branch deleted).
 The workflows were the `e2e/workflows/` files with `pull_request` triggers and `runs-on: [ownci, t11e2e]`.
 The MVP checklist above was ticked by the v0.1.0 run.
 
@@ -94,7 +94,7 @@ The MVP checklist above was ticked by the v0.1.0 run.
 |---|---|
 | Machine | WSL2 openSUSE-Tumbleweed, kernel 6.18.54.1-microsoft-standard-WSL2 |
 | Docker | Docker Desktop, server 29.5.3 (socket gid 1001 inside containers) |
-| OwnCI | `dc03cd9-dirty` (t11 working tree), release build (`make build`) |
+| OwnCI | `dc03cd9-dirty` (container-runner working tree), release build (`make build`) |
 | Runner | 2.338.0 pinned = actual (no self-update offered) |
 | Runner image | `ghcr.io/actions/actions-runner:2.338.0@sha256:4ffadc00…` |
 
@@ -110,7 +110,7 @@ The MVP checklist above was ticked by the v0.1.0 run.
 | `kill -9` of the supervisor | ✅ (after a fix) | first try: leftover container force-removed → "A session for this runner already exists … Conflict" for ~3 min. Fix: `docker stop --signal SIGINT` before removal. Retest: `start` recovered in 8 s, 0 conflicts; runs 39769050350/080/163 all green afterwards |
 | Switch to host mode (`setup --force --mode host`) | ✅ (after a fix) | first try failed: real `config.sh` refuses an existing `.runner` even with `--replace` (pre-existing t06 bug). Fixed; id 24 kept |
 | Host-mode regression | ✅ | runs 39769696425 (pass ✓), 39769696508 (poison ✓), 39769696737 (nocontainer ✗) and 39769696653 (default-image ✗), both failing with "Jobs without a job container are forbidden on this runner" |
-| No tokens in the data dir | ✅ | `grep -rEI 'gh[pousr]_…|github_pat_'` → no tokens found |
+| No tokens in the data dir | ✅ | `grep -rEI 'gh[pousr]_…\|github_pat_'` → no tokens found |
 | Uninstall in container mode | ✅ | `uninstall --unregister --purge --yes`: stopped, unregistered (0 runners on GitHub), data dir gone, no `ownci-*` container, no `/home/runner` |
 | Custom image refused: plain `ubuntu:22.04` | ✅ | `image ubuntu:22.04 cannot host the runner; it lacks: docker libicu`, before registration (0 runners on GitHub) |
 | Custom image: Ubuntu 22.04 (`e2e/images/ubuntu22.Dockerfile`, built locally) | ✅ | PR #5, runs 39771315949 (pass ✓), 39771315977 (default-image ✓: `Ubuntu 22.04.5 LTS`, `uid=1000(ownci)`), 39771315948 (poison ✓) |

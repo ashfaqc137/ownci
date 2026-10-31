@@ -17,7 +17,7 @@ const (
 	SourceGH          TokenSource = "gh"
 )
 
-// ResolveToken finds a GitHub token in the order of D4: $GITHUB_TOKEN,
+// ResolveToken finds a GitHub token in this order: $GITHUB_TOKEN,
 // $GH_TOKEN, then `gh auth token`. The token is registered with the log
 // redactor before it is returned. Nothing is persisted.
 func ResolveToken(ctx context.Context, getenv func(string) string, r execx.Runner) (string, TokenSource, error) {
@@ -38,6 +38,6 @@ func ResolveToken(ctx context.Context, getenv func(string) string, r execx.Runne
 	}
 	return "", "", &Error{
 		Msg:  "no GitHub token found",
-		Hint: "set GITHUB_TOKEN to a token with admin access to the repo, or run 'gh auth login'",
+		Hint: "Set GITHUB_TOKEN to a token with admin access to the repository, or run 'gh auth login'.",
 	}
 }

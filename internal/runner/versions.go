@@ -29,7 +29,7 @@ func asset(version, arch, sha string) Asset {
 	}
 }
 
-// Pinned is the runner version OwnCI downloads on first install (D5). The
+// Pinned is the runner version OwnCI downloads on first install. The
 // runner self-updates afterwards. Pinned 2026-10-15 from actions/runner
 // v2.338.0 (published 2026-10-06); SHA256 values come from the release notes.
 var Pinned = Release{

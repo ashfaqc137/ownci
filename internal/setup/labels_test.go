@@ -15,7 +15,7 @@ func TestValidateLabels(t *testing.T) {
 	if got, err := ValidateLabels(nil); err != nil || len(got) != 0 {
 		t.Errorf("nil: %v, %v", got, err)
 	}
-	for _, bad := range []string{"self-hosted", "Self-Hosted", "linux", "x64", "arm64", "macos", "a b", "gpu!", "é"} {
+	for _, bad := range []string{"self-hosted", "Self-Hosted", "linux", "x64", "arm64", "macos", "ubuntu-latest", "Ubuntu-24.04", "windows-2025", "macos-15", "a b", "gpu!", "é"} {
 		_, err := ValidateLabels([]string{"ok", bad})
 		var e *Error
 		if !errors.As(err, &e) || !e.Usage || e.Hint == "" {

@@ -3,7 +3,7 @@
 #
 # dist/ownci_<version>_linux_{amd64,arm64}.tar.gz (the ownci binary, README.md,
 # LICENSE if present) and dist/SHA256SUMS. The binaries are built without the
-# `dev` tag, and the build fails if any dev-override string slipped in (D8).
+# `dev` tag, and the build fails if any dev-override string slipped in.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

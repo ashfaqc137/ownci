@@ -229,10 +229,13 @@ func TestHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--no-default-labels", "--labels ownci", "--token ***", "--name ownci-box", "--unattended"} {
+	for _, want := range []string{"--no-default-labels", "--labels ownci", "--name ownci-box", "--unattended"} {
 		if !strings.Contains(string(args), want) {
 			t.Errorf("config.sh args %q lack %q", args, want)
 		}
+	}
+	if strings.Contains(string(args), "--token") {
+		t.Errorf("the token must not be a command-line argument: %q", args)
 	}
 	if strings.Contains(string(args), "--replace") {
 		t.Errorf("fresh setup used --replace: %q", args)
@@ -300,11 +303,11 @@ func TestPublicRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := e.errOut.String()
-	if !strings.Contains(w, "WARNING") || !strings.Contains(w, "Require approval for all outside collaborators") {
+	if !strings.Contains(w, "WARNING") || !strings.Contains(w, "Require approval for all external contributors") {
 		t.Errorf("stderr lacks the public-repo warning:\n%s", w)
 	}
-	if e.loadConfig().Repo != "me/pub" {
-		t.Error("config not saved")
+	if c := e.loadConfig(); c.Repo != "me/pub" || !c.AllowPublicRepo {
+		t.Errorf("config = %+v, want me/pub with allowPublicRepo", c)
 	}
 }
 
@@ -349,6 +352,57 @@ func TestSecondSetupRefusedThenForce(t *testing.T) {
 		t.Errorf("createdAt changed: %v → %v", first.CreatedAt, again.CreatedAt)
 	}
 	e.assertNoSecrets()
+}
+
+func TestForceReplacesOutdatedRunner(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	if err := e.run(Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// A runner that could not self-update: older than the one OwnCI pins.
+	listener := filepath.Join(e.runnerDir("ownci-box"), "bin", "Runner.Listener")
+	b, err := os.ReadFile(listener)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(string(b), fakegh.RunnerVersion, "1.0.0", 1)
+	if err := os.WriteFile(listener, []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.out.Reset()
+
+	if err := e.run(Options{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	out := e.out.String()
+	if !strings.Contains(out, "older than "+fakegh.RunnerVersion) || !strings.Contains(out, "downloaded, verified and extracted") {
+		t.Errorf("an outdated runner should be replaced:\n%s", out)
+	}
+	if got := e.loadConfig().InstalledVersion; got != fakegh.RunnerVersion {
+		t.Errorf("installed version = %q, want %q", got, fakegh.RunnerVersion)
+	}
+	if got := fakeLabels(e, "me/demo"); len(got) != 1 {
+		t.Errorf("runners after force = %v", got)
+	}
+	e.assertNoSecrets()
+}
+
+func TestOlderVersion(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"2.330.0", "2.338.0", true},
+		{"2.338.0", "2.338.0", false},
+		{"2.340.1", "2.338.0", false},
+		{"1.0.0", "9.9.9-fake", true},
+		{"", "2.338.0", false},
+		{"garbage", "2.338.0", false},
+	} {
+		if got := olderVersion(c.a, c.b); got != c.want {
+			t.Errorf("olderVersion(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
 }
 
 func TestForceRefusedWhileRunnerRuns(t *testing.T) {
@@ -485,7 +539,7 @@ func TestDryRun(t *testing.T) {
 	out := e.out.String()
 	for _, want := range []string{
 		"Dry run", e.ts.URL + "/_fake/runner.tar.gz", e.fg.RunnerSHA256(),
-		"--token ***", "--labels ownci,gpu", "--no-default-labels", "--url " + e.ts.URL + "/web/me/demo",
+		"ACTIONS_RUNNER_INPUT_TOKEN=*** ./config.sh", "--labels ownci,gpu", "--no-default-labels", "--url " + e.ts.URL + "/web/me/demo",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run output lacks %q:\n%s", want, out)
@@ -730,6 +784,18 @@ func TestContainerRunnerRefusesSymlinkedDataDir(t *testing.T) {
 	}
 	e.deps.Paths = config.NewPaths(link)
 	wantErr(t, e.run(Options{Mode: config.ModeContainerRunner}), "goes through a symlink", "--data-dir")
+	if n := len(e.fg.Snapshot().Tokens); n != 0 {
+		t.Errorf("requested %d tokens before refusing", n)
+	}
+}
+
+func TestHostModeRefusesUnmountableDataDir(t *testing.T) {
+	e := newEnv(t, fakegh.Options{}, nil)
+	e.deps.Paths = config.NewPaths(filepath.Join(t.TempDir(), "a:b"))
+	if err := e.deps.Paths.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	wantErr(t, e.run(Options{}), "contains ':' or ','", "--data-dir")
 	if n := len(e.fg.Snapshot().Tokens); n != 0 {
 		t.Errorf("requested %d tokens before refusing", n)
 	}

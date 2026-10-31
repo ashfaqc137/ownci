@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,15 +14,14 @@ import (
 
 func TestConfigureArgs(t *testing.T) {
 	o := ConfigureOptions{URL: "https://github.com/o/r", Token: "REGTOKEN123", Name: "n", Labels: []string{"ownci", "gpu"}}
-	got := strings.Join(ConfigureArgs(o, false), " ")
-	want := "--unattended --url https://github.com/o/r --token REGTOKEN123 --name n --labels ownci,gpu --no-default-labels --work _work"
+	got := strings.Join(ConfigureArgs(o), " ")
+	want := "--unattended --url https://github.com/o/r --name n --labels ownci,gpu --no-default-labels --work _work"
 	if got != want {
 		t.Errorf("args = %q\nwant   %q", got, want)
 	}
 	o.Replace = true
-	masked := strings.Join(ConfigureArgs(o, true), " ")
-	if strings.Contains(masked, "REGTOKEN123") || !strings.Contains(masked, "--token ***") || !strings.HasSuffix(masked, "--replace") {
-		t.Errorf("masked = %q", masked)
+	if got := strings.Join(ConfigureArgs(o), " "); strings.Contains(got, "REGTOKEN123") || !strings.HasSuffix(got, "--replace") {
+		t.Errorf("args = %q", got)
 	}
 }
 
@@ -31,8 +31,12 @@ func TestConfigureRunsConfigShInDir(t *testing.T) {
 	if err := Configure(context.Background(), f, "/r", ConfigureOptions{URL: "u", Token: "TOKEN-ABCDEFGH", Name: "n", Labels: []string{"ownci"}}); err != nil {
 		t.Fatal(err)
 	}
-	if c := f.Calls(); len(c) != 1 || c[0].Dir != "/r" {
-		t.Errorf("calls = %+v", c)
+	c := f.Calls()
+	if len(c) != 1 || c[0].Dir != "/r" {
+		t.Fatalf("calls = %+v", c)
+	}
+	if strings.Contains(c[0].String(), "TOKEN-ABCDEFGH") || !slices.Contains(c[0].Env, TokenEnv+"=TOKEN-ABCDEFGH") {
+		t.Errorf("the token must travel in %s, not argv: %+v", TokenEnv, c[0])
 	}
 }
 

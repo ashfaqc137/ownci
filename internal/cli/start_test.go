@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,6 +34,11 @@ func TestMain(m *testing.M) {
 		os.Args = append([]string{"ownci"}, os.Args[1:]...)
 		os.Exit(Execute())
 	}
+	// Tests never reach the real GitHub: a token from the developer's
+	// environment or gh would otherwise make 'start' check visibility there.
+	os.Unsetenv("GITHUB_TOKEN")
+	os.Unsetenv("GH_TOKEN")
+	apiBaseURL = func() string { return "http://127.0.0.1:1" }
 	os.Exit(m.Run())
 }
 
@@ -458,6 +465,18 @@ func TestStatusRemote(t *testing.T) {
 			t.Errorf("status:\n%s", stdout)
 		}
 	})
+	t.Run("repository made public warns", func(t *testing.T) {
+		useFake(t, healthyFake())
+		fg := fakegh.New(fakegh.Options{PublicRepos: []string{"me/demo"}})
+		fg.AddRunner("me/demo", testRunner, "ownci")
+		useGitHub(t, fg)
+		t.Setenv("GITHUB_TOKEN", "fake-token")
+		p := installRunner(t)
+		stdout, _, _ := runCLI(t, "--data-dir", p.Root, "status", "--remote")
+		if !strings.Contains(stdout, "me/demo is now public") {
+			t.Errorf("status:\n%s", stdout)
+		}
+	})
 	t.Run("no token", func(t *testing.T) {
 		useFake(t, healthyFake()) // the fake has no gh on PATH
 		t.Setenv("GITHUB_TOKEN", "")
@@ -497,5 +516,44 @@ func TestVersionShowsRunnerWhenConfigured(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); err == nil {
 		t.Error("version created the data dir")
+	}
+}
+
+func TestStartRefusesRepositoryMadePublic(t *testing.T) {
+	useFake(t, healthyFake())
+	useGitHub(t, fakegh.New(fakegh.Options{PublicRepos: []string{"me/demo"}}))
+	t.Setenv("GITHUB_TOKEN", "fake-token")
+	p := installRunner(t)
+	_, stderr, code := runCLI(t, "--data-dir", p.Root, "start", "--detach")
+	if code != 1 || !strings.Contains(stderr, "me/demo is now a public repository") || !strings.Contains(stderr, "--allow-public-repo") {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if running, _, _ := supervisor.IsRunning(p, testRunner); running {
+		t.Error("the runner was started")
+	}
+}
+
+func TestCheckVisibility(t *testing.T) {
+	app := &App{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	cfg := func(allow bool) *config.Config {
+		return &config.Config{Runner: &config.RunnerConfig{Name: testRunner, Repo: "me/demo", AllowPublicRepo: allow}}
+	}
+	useFake(t, healthyFake())
+	t.Setenv("GITHUB_TOKEN", "fake-token")
+
+	useGitHub(t, fakegh.New(fakegh.Options{}))
+	if err := checkVisibility(context.Background(), app, cfg(false)); err != nil {
+		t.Errorf("private repository: %v", err)
+	}
+	useGitHub(t, fakegh.New(fakegh.Options{PublicRepos: []string{"me/demo"}}))
+	if err := checkVisibility(context.Background(), app, cfg(true)); err != nil {
+		t.Errorf("public repository accepted at setup: %v", err)
+	}
+	if err := checkVisibility(context.Background(), app, cfg(false)); err == nil {
+		t.Error("public repository not accepted at setup: want an error")
+	}
+	t.Setenv("GITHUB_TOKEN", "")
+	if err := checkVisibility(context.Background(), app, cfg(false)); err != nil {
+		t.Errorf("without a token start must not be blocked: %v", err)
 	}
 }

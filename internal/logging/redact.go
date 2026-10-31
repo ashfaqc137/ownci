@@ -1,10 +1,8 @@
 package logging
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"regexp"
 	"sort"
@@ -15,11 +13,6 @@ import (
 const (
 	mask         = "***"
 	minSecretLen = 8
-	// maxLine bounds RedactWriter's buffer when the input has no newlines.
-	maxLine = 1 << 20
-	// keepTail is held back when a over-long line is flushed, so a secret
-	// straddling the cut is still caught in the next chunk.
-	keepTail = 256
 )
 
 var (
@@ -57,58 +50,6 @@ func Redact(s string) string {
 	}
 	s = tokenPatterns.ReplaceAllString(s, mask)
 	return tokenFlag.ReplaceAllString(s, "${1}"+mask)
-}
-
-// RedactWriter wraps w so that every line passes through Redact.
-//
-// Redaction is line-buffered: bytes are held until a newline arrives, so a
-// secret split across two Writes within one line is still masked. The cost is
-// that a trailing partial line is only written on Close (the returned value
-// implements io.Closer; callers must Close it to flush). Lines longer than
-// 1 MiB are flushed in chunks, keeping a short tail back.
-func RedactWriter(w io.Writer) io.WriteCloser { return &redactWriter{w: w} }
-
-type redactWriter struct {
-	mu  sync.Mutex
-	w   io.Writer
-	buf []byte
-}
-
-func (r *redactWriter) Write(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.buf = append(r.buf, p...)
-	for {
-		i := bytes.IndexByte(r.buf, '\n')
-		if i < 0 {
-			break
-		}
-		line := string(r.buf[:i+1])
-		r.buf = r.buf[i+1:]
-		if _, err := io.WriteString(r.w, Redact(line)); err != nil {
-			return len(p), err
-		}
-	}
-	if len(r.buf) > maxLine {
-		cut := len(r.buf) - keepTail
-		if _, err := io.WriteString(r.w, Redact(string(r.buf[:cut]))); err != nil {
-			return len(p), err
-		}
-		r.buf = append([]byte(nil), r.buf[cut:]...)
-	}
-	return len(p), nil
-}
-
-// Close flushes a trailing partial line. It does not close the wrapped writer.
-func (r *redactWriter) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.buf) == 0 {
-		return nil
-	}
-	_, err := io.WriteString(r.w, Redact(string(r.buf)))
-	r.buf = nil
-	return err
 }
 
 // redactHandler redacts the message and every string-ish attribute before

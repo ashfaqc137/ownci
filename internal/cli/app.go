@@ -108,7 +108,9 @@ func setupApp(cmd *cobra.Command, f *rootFlags) (*App, io.Closer, error) {
 		Err:      cmd.ErrOrStderr(),
 	}
 	for _, n := range notes {
-		logger.Debug(n)
+		// Changing a directory's permissions is visible to the user, so say so.
+		logger.Info(n)
+		fmt.Fprintf(app.Err, "Note: %s\n", n)
 	}
 	if paths.Foreign() {
 		logger.Warn("data directory was not created by ownci; 'uninstall --purge' will refuse to delete it", "datadir", root)

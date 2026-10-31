@@ -1,6 +1,10 @@
 package uninstall
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ashfaqc137/ownci/internal/hooks"
+)
 
 // summary is what `uninstall` reports at the end, truthfully for each part.
 type summary struct {
@@ -45,7 +49,11 @@ func (r *run) printSummary() {
 	} else {
 		fmt.Fprintf(w, "  %-16s kept at %s (use --purge to remove)\n", "Local files", r.d.Paths.Root)
 	}
-	fmt.Fprintf(w, "  %-16s Docker images (busybox cleanup image, the runner image of container-runner mode, job images) — remove with 'docker image prune' if desired\n", "Not touched")
+	images := hooks.CleanupImage
+	if r.cfg != nil && r.cfg.Image != "" {
+		images += " " + r.cfg.Image
+	}
+	fmt.Fprintf(w, "  %-16s Docker images: the jobs' images, and OwnCI's (remove with 'docker image rm %s' if desired)\n", "Not touched", images)
 	if r.o.Purge && !r.sum.files.OthersRemain {
 		r.printBinaryHint()
 	}

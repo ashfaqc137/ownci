@@ -28,7 +28,7 @@ func buildOwnci(t *testing.T, tags string) []byte {
 	return b
 }
 
-// D8: release builds must not contain the dev override code. The dev build is
+// Release builds must not contain the dev override code. The dev build is
 // built too, as a control: if it did not contain the strings the check would be
 // vacuous.
 func TestReleaseBuildHasNoDevOverrides(t *testing.T) {

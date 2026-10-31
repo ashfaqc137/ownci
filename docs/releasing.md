@@ -2,7 +2,7 @@
 
 Pushing a `v*` tag publishes a GitHub release through
 [`.github/workflows/release.yml`](../.github/workflows/release.yml). Linux `amd64` and `arm64`
-only (D9): Windows users run the Linux binary in WSL2, and macOS is not supported yet (`tasks/future.md` F5).
+only: Windows users run the Linux binary in WSL2, and macOS is not supported yet.
 
 ## Release
 
@@ -63,7 +63,7 @@ make release VERSION=v0.1.0          # refuses a dirty tracked tree; ALLOW_DIRTY
   built with `CGO_ENABLED=0 -trimpath` and no `dev` build tag;
 - `dist/SHA256SUMS`.
 
-The script fails if a binary contains any `OWNCI_DEV` string (the dev overrides of D8 must never
+The script fails if a binary contains any `OWNCI_DEV` string (the dev overrides must never
 ship; `cmd/ownci/release_test.go` checks the same). Check a binary by hand:
 
 ```bash
@@ -87,4 +87,4 @@ separately tested change).
 ## Not done yet
 
 Package managers, signing the archives (beyond the GitHub attestations), auto-update, and
-macOS/native Windows builds (`tasks/future.md` F5).
+macOS/native Windows builds.

@@ -17,6 +17,7 @@ ownci version
 const installSource = `
 git clone https://github.com/ashfaqc137/ownci.git
 cd ownci
+git checkout "$(git describe --tags --abbrev=0)"   # the latest release
 make build                                      # builds bin/ownci
 install -m 0755 bin/ownci ~/.local/bin/ownci
 `
@@ -53,7 +54,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <p class="section-kicker">Step 1</p>
     <h2>Requirements</h2>
     <ul>
-      <li><strong>Linux or WSL2</strong> on amd64 or arm64, and a <strong>non-root</strong> user (the runner refuses root). Native Windows and macOS are not supported yet.</li>
+      <li><strong>Linux or WSL2</strong> on amd64 or arm64, and a <strong>non-root</strong> user (the runner refuses root). Tested end to end on WSL2 with Docker Desktop (amd64); native Linux and arm64 are built but not yet tested. Native Windows and macOS are not supported.</li>
       <li>
         <strong>Docker</strong> with a Linux daemon that your user can reach.
         On WSL2 with Docker Desktop, enable your distro under <em>Settings → Resources → WSL integration</em>.
@@ -73,7 +74,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <h3>With the install script</h3>
     <Code label="shell" code={installScript} />
     <p>
-      The script downloads the latest release for your architecture, checks it against the release's <code>SHA256SUMS</code> and installs <code>ownci</code> into <code>~/.local/bin</code>.
+      The script downloads the latest release for your architecture, checks it against the release’s <code>SHA256SUMS</code> and installs <code>ownci</code> into <code>~/.local/bin</code>.
       <code>OWNCI_VERSION</code> pins a version and <code>OWNCI_INSTALL_DIR</code> picks another directory, e.g. <code>… | OWNCI_VERSION=v0.1.0 sh</code>.
     </p>
     <h3>From a release, by hand</h3>
@@ -119,7 +120,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <Code label="shell" code={stopping} />
     <p>
       <code>ownci uninstall</code> without flags only stops the runner and explains what is left.
-      The binary itself stays; remove it afterwards with <code>rm ~/.local/bin/ownci</code>.
+      The binary itself stays; remove it afterwards with <code>rm ~/.local/bin/ownci</code> (or wherever <code>OWNCI_INSTALL_DIR</code> put it).
       See <a href={href('/docs/commands/')}>all commands</a>.
     </p>
   </section>

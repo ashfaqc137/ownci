@@ -41,9 +41,8 @@ func killOrphans(runnerDir string) []int {
 	return pids
 }
 
-// orphanPids lists processes whose executable or first script argument lives
-// under runnerDir (bin/Runner.Listener, bin/Runner.Worker, run.sh, ...), except
-// self.
+// orphanPids lists the runner's processes under runnerDir (see
+// runnerProcess), except self.
 func orphanPids(runnerDir string, self int) []int {
 	prefix := filepath.Clean(runnerDir) + string(filepath.Separator)
 	entries, err := os.ReadDir("/proc")
@@ -60,15 +59,32 @@ func orphanPids(runnerDir string, self int) []int {
 		if err != nil || len(b) == 0 {
 			continue
 		}
-		args := strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
-		for i := 0; i < len(args) && i < 2; i++ {
-			if strings.HasPrefix(filepath.Clean(args[i])+string(filepath.Separator), prefix) {
-				pids = append(pids, pid)
-				break
-			}
+		if runnerProcess(strings.Split(strings.TrimRight(string(b), "\x00"), "\x00"), prefix) {
+			pids = append(pids, pid)
 		}
 	}
 	return pids
+}
+
+// runnerProcess reports whether a command line belongs to the runner: an
+// executable under the runner directory (bin/Runner.Listener, ...) or a shell
+// running one of its scripts (run.sh, run-helper.sh). Other programs that
+// merely name a file there, such as an editor open on .env, are left alone.
+func runnerProcess(args []string, prefix string) bool {
+	under := func(p string) bool {
+		return strings.HasPrefix(filepath.Clean(p)+string(filepath.Separator), prefix)
+	}
+	if len(args) == 0 {
+		return false
+	}
+	if under(args[0]) {
+		return true
+	}
+	switch filepath.Base(args[0]) {
+	case "bash", "sh", "dash":
+		return len(args) > 1 && strings.HasSuffix(args[1], ".sh") && under(args[1])
+	}
+	return false
 }
 
 func isZombie(pid int) bool {

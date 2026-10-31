@@ -12,7 +12,7 @@ import (
 )
 
 // ConfigureOptions are the inputs to `config.sh`. Labels are passed together
-// with --no-default-labels (D2), so the runner carries exactly these labels.
+// with --no-default-labels, so the runner carries exactly these labels.
 type ConfigureOptions struct {
 	URL     string
 	Token   string // registration token; never logged or printed
@@ -21,15 +21,16 @@ type ConfigureOptions struct {
 	Replace bool
 }
 
-// ConfigureArgs returns config.sh's arguments. With maskToken the token is
-// replaced by "***", which is what dry-run output and logs show.
-func ConfigureArgs(o ConfigureOptions, maskToken bool) []string {
-	tok := o.Token
-	if maskToken {
-		tok = "***"
-	}
+// TokenEnv carries the registration or removal token to config.sh. The
+// runner reads ACTIONS_RUNNER_INPUT_<arg> like --<arg>; unlike an argument,
+// the environment is not visible to other users in /proc/<pid>/cmdline.
+const TokenEnv = "ACTIONS_RUNNER_INPUT_TOKEN"
+
+// ConfigureArgs returns config.sh's arguments. The token is not among them: it
+// is passed in TokenEnv.
+func ConfigureArgs(o ConfigureOptions) []string {
 	args := []string{
-		"--unattended", "--url", o.URL, "--token", tok, "--name", o.Name,
+		"--unattended", "--url", o.URL, "--name", o.Name,
 		"--labels", strings.Join(o.Labels, ","), "--no-default-labels", "--work", "_work",
 	}
 	if o.Replace {
@@ -44,8 +45,9 @@ func Configure(ctx context.Context, ex execx.Runner, dir string, o ConfigureOpti
 	logging.RegisterSecret(o.Token)
 	res, err := ex.Run(ctx, execx.Cmd{
 		Name: filepath.Join(dir, "config.sh"),
-		Args: ConfigureArgs(o, false),
+		Args: ConfigureArgs(o),
 		Dir:  dir,
+		Env:  []string{TokenEnv + "=" + o.Token},
 	})
 	if err != nil {
 		return &Error{
@@ -82,14 +84,15 @@ func tailLines(res execx.Result, n int) string {
 }
 
 // Remove unregisters the runner in dir by running `./config.sh remove`. The
-// removal token is single-use and never logged. On failure the error carries
+// removal token is passed in TokenEnv and never logged. On failure the error carries
 // the last 20 lines of the (redacted) output.
 func Remove(ctx context.Context, ex execx.Runner, dir, token string) error {
 	logging.RegisterSecret(token)
 	res, err := ex.Run(ctx, execx.Cmd{
 		Name: filepath.Join(dir, "config.sh"),
-		Args: []string{"remove", "--token", token},
+		Args: []string{"remove"},
 		Dir:  dir,
+		Env:  []string{TokenEnv + "=" + token},
 	})
 	if err != nil {
 		return &Error{Msg: fmt.Sprintf("could not run config.sh remove: %v", err), Err: err,

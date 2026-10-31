@@ -29,7 +29,8 @@ func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check that this machine can run OwnCI (platform, Docker, dependencies)",
-		Long: `Check that this machine can run OwnCI. Read-only.
+		Long: `Check that this machine can run OwnCI. It changes nothing, except that it
+creates the data directory if it is missing.
 
 Exits 3 when any check fails; warnings do not affect the exit code.`,
 		Args: cobra.NoArgs,
