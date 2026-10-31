@@ -24,11 +24,18 @@ jobs:
   check:
     if: contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
     runs-on: [ownci, "dev-${{ github.event.pull_request.user.login }}", "build-${{ github.event.pull_request.head.sha }}"]
-    container: golang:1.27.2 # keep in step with go.mod
+    container:
+      image: golang:1.27.2 # keep in step with go.mod
+      # Steps run through docker exec, so killed test processes are orphaned to PID 1; with --init
+      # it reaps them instead of leaving zombies the supervisor tests count as survivors.
+      options: --init
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }} # the pull request's code, not main's
           persist-credentials: false
+      # The workspace belongs to the runner's user and the container runs as root; without this,
+      # git refuses the repository and go build cannot stamp the VCS information.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: make check
