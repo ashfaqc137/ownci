@@ -3,11 +3,40 @@
 > The MVP acceptance checklist. Tick an item **only** with evidence from running
 > [`e2e.md`](e2e.md) against real GitHub: a run URL, a log excerpt or a screenshot path, with the date.
 >
-> **Status: EXECUTED 2026-10-22 for v0.1.0 — all items pass on WSL2 + Docker Desktop (amd64).**
+> **Status: EXECUTED 2026-10-22 for v0.1.0 and 2026-10-31 for v0.2.0 — all items pass on WSL2 + Docker Desktop (amd64).**
 > Run with the **release binary** (`make release VERSION=v0.1.0`, the amd64
 > archive) on private `ashfaqc137/blog`, throwaway PR #6 (closed, branch deleted). The workflows were the
 > `e2e/workflows/` files with `pull_request` triggers and an extra label, so the sandbox's default branch
 > was not touched. Native Linux (Docker Engine) and arm64 are **not** covered by this record.
+
+## v0.2.0 run (2026-10-31)
+
+Run with the **release binary** (`make release VERSION=v0.2.0`, amd64 archive, commit `941d98a`; Go code
+identical to `main` at `bed1383`) on private `ashfaqc137/blog`, throwaway PRs #7 (host) and #8
+(container-runner), both closed with their branches deleted. Workflows: the `e2e/workflows/` files with
+`pull_request` triggers and an extra label. Same machine as below; Docker Desktop 29.5.3; runner 2.338.0
+pinned = actual.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Doctor (step 2) | ✅ | 7 passed, 0 warnings |
+| Setup, token passed through `ACTIONS_RUNNER_INPUT_TOKEN` (step 3) | ✅ | `registered on GitHub (id 28)`, labels `ownci,v020e2e`; `drwx------` data/config, `-rw-------` config.json; `.env` has `ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER=true`, the hook and the pinned busybox |
+| Public repo refused (step 4) | ✅ | `ashfaqc137/ownci is a public repository …`, hint `--allow-public-repo`, exit 1, empty `runners/` |
+| PR check (step 6) | ✅ | https://github.com/ashfaqc137/blog/actions/runs/41177285398: `Ubuntu 24.04.5 LTS`, `runner=ownci-ashfaq`, `ownci: workspace cleaned` |
+| No-container rejection (step 7) | ✅ | https://github.com/ashfaqc137/blog/actions/runs/41177285390 ✗ (expected): `Jobs without a job container are forbidden on this runner …` |
+| Poison test (step 8) | ✅ | https://github.com/ashfaqc137/blog/actions/runs/41177285429: `ok, absent:` for `_tool`, `../poison`, `_actions`; `_work` = `_PipelineMapping`, `_temp` |
+| Hook pulls a missing cleanup image | ✅ | busybox image removed before the jobs; the first cleanup succeeded (`last-cleanup.json` `ok`) and the image was present again |
+| Stop / restart, no re-registration (step 9) | ✅ | runner id 28 before and after; re-run of 41177285398 (attempt 2) ✓ |
+| Kill test (step 10) | ✅ | `Process stopped (unexpectedly …)`; `start` killed the orphaned `Runner.Listener` and left another data dir's runner alone; online after the known session conflict |
+| No tokens in logs (step 11) | ✅ | `no tokens found` in both data dirs |
+| `start` re-checks visibility | ✅ | public `ashfaqc137/ownci` runner with `allowPublicRepo` removed from its config: `Error: ashfaqc137/ownci is now a public repository …`, exit 1; started normally once restored |
+| `setup --force` replaces an outdated runner | ✅ | `Runner.Listener --version` stubbed to 2.300.0 → `The extracted runner 2.300.0 is older than 2.338.0: replacing it`, same runner id 28 and labels; re-run of 41177285429 (attempt 2) ✓ |
+| Uninstall (step 12, C5) | ✅ | both data dirs gone, 0 runners on `blog`, no `ownci-*` container, no `/home/runner` |
+| Container-runner C1/C2 | ✅ | runner id 29, `.env` without `REQUIRE_JOB_CONTAINER`; runs 41177968884 (pass ✓), 41177968909 (default-image ✓: `Ubuntu 24.04.5 LTS`, `uid=1000(ubuntu)`, `docker server 29.5.3`, `ok, absent:` markers), 41177968871 (poison ✓); 5× `starting a fresh runner`, `restarts 0` |
+
+## v0.1.0 run (2026-10-22)
+
+The MVP checklist below was ticked by this run.
 
 | Field | Value |
 |---|---|
