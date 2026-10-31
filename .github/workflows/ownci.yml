@@ -1,0 +1,34 @@
+# make check again, on OwnCI itself: on the pull request author's own runner, built from the
+# pull request's head commit with `make dogfood` (tools/dogfood.sh). A second gate next to ci.yml:
+# a change that breaks OwnCI's ability to run CI fails here.
+#
+# pull_request_target runs this file from main, so a pull request cannot change where it runs.
+# It runs only for pull requests from the owner, members and collaborators, uses no secrets and
+# a read-only token. The job waits in the queue until a runner labelled with the head commit is
+# listening.
+name: ownci
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ownci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true # a new push needs a runner built from the new commit
+
+jobs:
+  check:
+    if: contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: [ownci, "dev-${{ github.event.pull_request.user.login }}", "build-${{ github.event.pull_request.head.sha }}"]
+    container: golang:1.27.2 # keep in step with go.mod
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }} # the pull request's code, not main's
+          persist-credentials: false
+      - run: make check
