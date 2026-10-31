@@ -1,5 +1,6 @@
 ---
 import DocsShell from '../../components/DocsShell.astro'
+import DocsHeading from '../../components/DocsHeading.astro'
 import Code from '../../components/Code.astro'
 
 const crSetup = `
@@ -54,6 +55,41 @@ jobs:
       - run: npm ci && npm run build
 `
 
+const llmKey = `
+sudo mkdir -p /etc/ownci
+sudo install -m 600 -o "$USER" -g "$(id -gn)" /dev/null /etc/ownci/llm.env
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > /etc/ownci/llm.env
+`
+
+const llmWorkflow = `
+# .github/workflows/ai-review.yml, on main
+on:
+  pull_request_target:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  ai-review:
+    if: contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: [ownci, "dev-\${{ github.event.pull_request.user.login }}"]   # the PR author's machine
+    container:
+      image: node:22
+      volumes:
+        - /etc/ownci/llm.env:/run/llm.env:ro     # the author's key, from their machine
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0                           # for the diff against the base branch
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm install -g @anthropic-ai/claude-code@2.1.316
+      - run: |
+          set -a; . /run/llm.env; set +a
+          git diff "origin/\${{ github.base_ref }}...HEAD" \\
+            | claude -p "Review this diff for bugs. Be brief." >> "$GITHUB_STEP_SUMMARY"
+`
+
 const severalRepos = `
 ownci --data-dir ~/.local/share/ownci-app setup --repo owner/app --name ownci-mybox-app
 ownci --data-dir ~/.local/share/ownci-app start --detach
@@ -64,11 +100,11 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
 
 <DocsShell
   title="Workflows"
-  description="Run workflows without a container: line, share one workflow file across a team, let only maintainers decide where jobs run, and serve several repositories from one machine."
+  description="Run workflows without a container: line, share one workflow file across a team, let only maintainers decide where jobs run, run LLM checks on the author’s own tokens, and serve several repositories from one machine."
 >
   <section class="docs-section" id="container-runner">
     <p class="section-kicker">Container-runner mode</p>
-    <h2>Run every job in a container, no <code>container:</code> needed</h2>
+    <DocsHeading level={2} id="container-runner">Run every job in a container, no <code>container:</code> needed</DocsHeading>
     <p>
       Workflows written for GitHub-hosted runners usually have no <code>container:</code> line. In
       container-runner mode they run unchanged. To switch an existing runner: <code>ownci stop</code>,
@@ -81,7 +117,7 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
       <li><strong>Jobs with <code>container:</code></strong> behave exactly as in host mode: the job container is a sibling on your Docker daemon.</li>
       <li><strong>Every job gets a fresh container.</strong> Anything a job changes outside the workspace (<code>apt-get install</code>, <code>/tmp</code>, <code>$HOME</code>) is gone for the next one, and the workspace is wiped as in host mode. Expect a few seconds between jobs while the new container connects.</li>
     </ul>
-    <h3>The runner image</h3>
+    <DocsHeading level={3} id="runner-image">The runner image</DocsHeading>
     <p>
       The default is the official <code>ghcr.io/actions/actions-runner</code> (Ubuntu 24.04), pinned by
       digest: about 2 GB, pulled once at setup. It has git, curl and the Docker CLI, but not the
@@ -100,7 +136,7 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
 
   <section class="docs-section" id="team">
     <p class="section-kicker">Teams</p>
-    <h2>One workflow file for a whole team</h2>
+    <DocsHeading level={2} id="team">One workflow file for a whole team</DocsHeading>
     <p>
       Give each developer’s runner their own label (<code>dev-</code> plus their GitHub username) and
       let the workflow pick the runner of whoever triggered it:
@@ -123,7 +159,7 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
 
   <section class="docs-section" id="maintainer-control">
     <p class="section-kicker">Maintainer control</p>
-    <h2>Let only maintainers decide where jobs run</h2>
+    <DocsHeading level={2} id="maintainer-control">Let only maintainers decide where jobs run</DocsHeading>
     <p>
       With <code>on: pull_request</code>, GitHub runs the workflow file from the PR, so a PR can
       change <code>runs-on</code> to any developer’s label. And anyone with write access can push a
@@ -159,9 +195,56 @@ ownci --data-dir ~/.local/share/ownci-lib start --detach
     </ul>
   </section>
 
+  <section class="docs-section" id="llm-checks">
+    <p class="section-kicker">LLM checks</p>
+    <DocsHeading level={2} id="llm-checks">Run LLM checks on the author’s own tokens</DocsHeading>
+    <p>
+      A job can run an AI coding CLI headless: Claude Code (<code>claude -p</code>), Codex
+      (<code>codex exec</code>) or GitHub Copilot CLI (<code>copilot -p</code>). With the author
+      routing above, an LLM review of a pull request runs on its author’s machine and spends its
+      author’s tokens. This is a recipe, not an OwnCI feature: OwnCI does nothing LLM-specific, and
+      its end-to-end tests do not cover it.
+    </p>
+    <p>
+      Repository secrets are the wrong place for the key: they hold one shared key for everyone, and
+      this workflow must not use secrets (see above). Keep each developer’s key on their own machine
+      and mount it into the job container instead.
+    </p>
+    <ol>
+      <li>
+        <strong>Each developer, once: put the key in a file at a path the whole team agrees on.</strong>
+        The path must be absolute and the same on every machine, so not under your home directory.
+        <Code label="shell" code={llmKey} />
+        Create it before the first job runs: if the file is missing, Docker creates an empty
+        directory in its place and the job fails reading it (<code>sudo rmdir /etc/ownci/llm.env</code>,
+        then create the file). To use a Claude subscription instead of an API key,
+        <code>claude setup-token</code> prints a long-lived token: store it as
+        <code>CLAUDE_CODE_OAUTH_TOKEN=…</code>. For Codex and Copilot, see their documentation for
+        headless authentication. Check your provider’s terms before using a personal subscription in
+        automation.
+      </li>
+      <li>
+        <strong>Run the check from <code>main</code> with <code>pull_request_target</code></strong>,
+        routed to the author’s runner as in <a href="#maintainer-control">the previous section</a>:
+        <Code label=".github/workflows/ai-review.yml" code={llmWorkflow} />
+        The review appears in the run’s summary, which needs no extra permission. Don’t give the job
+        <code>pull-requests: write</code> to post comments: the PR’s code runs in the same job and
+        would get that token too. In container-runner mode, keep the <code>container:</code> line,
+        because only a job container can mount a file from your machine.
+      </li>
+    </ol>
+    <ul>
+      <li><strong>The check is advisory, not a gate.</strong> It runs from the PR’s checkout on the author’s machine, so the author controls the repository’s prompts and skills (<code>.claude/</code>, <code>CLAUDE.md</code>) and, in the end, the result. Use it to help authors, not to approve merges.</li>
+      <li><strong>The job can read the key.</strong> So can the PR’s code, and a prompt hidden in the diff can ask the agent to leak it. Anyone with write access who pushes to someone else’s PR branch runs their code next to that author’s key. Leave the agent’s tools restricted: in <code>-p</code> mode Claude Code refuses tools that need approval unless you allow them, so don’t add <code>--dangerously-skip-permissions</code>. Prefer a key with a spending limit.</li>
+      <li><strong>Claude Code is installed on every run.</strong> The job container starts fresh, so nothing installed on your machine is in it. To skip the install, build an image <code>FROM node:22</code> with Claude Code installed, push it to a registry and use it as <code>image:</code>; each machine then downloads it once.</li>
+      <li><strong>Your own Claude setup stays on your machine.</strong> The job sees the repository’s <code>.claude/</code> and <code>CLAUDE.md</code> from the checkout and the key from the mounted file, not your <code>~/.claude</code> (login, settings, personal skills).</li>
+      <li><strong>Every push spends tokens.</strong> Limit the check with <code>paths:</code> filters, a label, or by diffing only the files that matter. LLM output varies from run to run.</li>
+    </ul>
+  </section>
+
   <section class="docs-section" id="several-repositories">
     <p class="section-kicker">Several repositories</p>
-    <h2>One data directory per repository</h2>
+    <DocsHeading level={2} id="several-repositories">One data directory per repository</DocsHeading>
     <p>
       One data directory holds one runner for one repository. For a second repository, give it its
       own data directory and runner name:

@@ -1,5 +1,6 @@
 ---
 import DocsShell from '../../components/DocsShell.astro'
+import DocsHeading from '../../components/DocsHeading.astro'
 import Code from '../../components/Code.astro'
 import { href } from '../../lib/paths'
 
@@ -52,7 +53,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
 >
   <section class="docs-section" id="requirements">
     <p class="section-kicker">Step 1</p>
-    <h2>Requirements</h2>
+    <DocsHeading level={2} id="requirements">Requirements</DocsHeading>
     <ul>
       <li><strong>Linux or WSL2</strong> on amd64 or arm64, and a <strong>non-root</strong> user (the runner refuses root). Tested end to end on WSL2 with Docker Desktop (amd64); native Linux and arm64 are built but not yet tested. Native Windows and macOS are not supported.</li>
       <li>
@@ -70,14 +71,14 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
 
   <section class="docs-section" id="install">
     <p class="section-kicker">Step 2</p>
-    <h2>Install</h2>
-    <h3>With the install script</h3>
+    <DocsHeading level={2} id="install">Install</DocsHeading>
+    <DocsHeading level={3} id="install-script">With the install script</DocsHeading>
     <Code label="shell" code={installScript} />
     <p>
       The script downloads the latest release for your architecture, checks it against the release’s <code>SHA256SUMS</code> and installs <code>ownci</code> into <code>~/.local/bin</code>.
       <code>OWNCI_VERSION</code> pins a version and <code>OWNCI_INSTALL_DIR</code> picks another directory, e.g. <code>… | OWNCI_VERSION=v0.1.0 sh</code>.
     </p>
-    <h3>From a release, by hand</h3>
+    <DocsHeading level={3} id="install-release">From a release, by hand</DocsHeading>
     <p>
       Download the archive for your architecture and <code>SHA256SUMS</code> from the <a href="https://github.com/ashfaqc137/ownci/releases" rel="noreferrer">Releases page</a>, then verify and install it:
     </p>
@@ -85,7 +86,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
     <p>
       Each archive carries a GitHub build-provenance attestation: <code>gh attestation verify ownci_&lt;version&gt;_linux_&lt;arch&gt;.tar.gz --repo ashfaqc137/ownci</code>.
     </p>
-    <h3>From source</h3>
+    <DocsHeading level={3} id="install-source">From source</DocsHeading>
     <p>With Go installed (see <code>go.mod</code> for the version), build the release configuration yourself:</p>
     <Code label="shell" code={installSource} />
     <p>
@@ -96,7 +97,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
 
   <section class="docs-section" id="quick-start">
     <p class="section-kicker">Step 3</p>
-    <h2>Set up and start</h2>
+    <DocsHeading level={2} id="quick-start">Set up and start</DocsHeading>
     <Code label="shell" code={quickStart} />
     <p>
       <code>ownci doctor</code> is read-only: it checks the platform, your user, the data directory,
@@ -106,7 +107,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
 
   <section class="docs-section" id="first-workflow">
     <p class="section-kicker">Step 4</p>
-    <h2>Point a workflow at your runner</h2>
+    <DocsHeading level={2} id="first-workflow">Point a workflow at your runner</DocsHeading>
     <p>In host mode (the default), <strong>both lines are required</strong>:</p>
     <Code label=".github/workflows/ci.yml" code={workflow} />
     <p>
@@ -116,7 +117,7 @@ ownci uninstall --unregister --purge      # remove it from GitHub and delete Own
 
   <section class="docs-section" id="stop">
     <p class="section-kicker">Step 5</p>
-    <h2>Stop or remove it</h2>
+    <DocsHeading level={2} id="stop">Stop or remove it</DocsHeading>
     <Code label="shell" code={stopping} />
     <p>
       <code>ownci uninstall</code> without flags only stops the runner and explains what is left.

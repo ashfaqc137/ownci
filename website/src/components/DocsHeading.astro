@@ -1,0 +1,19 @@
+---
+// A docs heading with a "#" permalink, so a section or subsection can be shared on its own.
+// An h2's link targets its <section>, which carries the id (so the kicker above the heading stays
+// in view); an h3 carries its id itself. The link sits next to the heading, not inside it, so the
+// heading's text stays clean, and takes its accessible name from the heading.
+interface Props {
+  level: 2 | 3
+  id: string
+}
+
+const { level, id } = Astro.props
+const Tag = level === 2 ? 'h2' : 'h3'
+const headingId = level === 2 ? `${id}-title` : id
+---
+
+<div class:list={['docs-heading', `docs-heading-${level}`]}>
+  <Tag id={headingId}><slot /></Tag>
+  <a class="permalink" href={`#${id}`} aria-labelledby={headingId}><span aria-hidden="true">#</span></a>
+</div>
