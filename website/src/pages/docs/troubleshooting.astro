@@ -1,5 +1,6 @@
 ---
 import DocsShell from '../../components/DocsShell.astro'
+import DocsHeading from '../../components/DocsHeading.astro'
 
 const rows = [
   ['docker is not available in this WSL 2 distro', 'Docker Desktop → Settings → Resources → WSL integration → enable the distro.'],
@@ -35,7 +36,7 @@ const rows = [
   description="Start with ownci doctor and ownci status. For logs: ownci logs, or ownci logs --source ownci. Add -v to a failing command to see its debug output."
 >
   <section class="docs-section" id="symptoms">
-    <h2>Symptoms and fixes</h2>
+    <DocsHeading level={2} id="symptoms">Symptoms and fixes</DocsHeading>
     <div class="table-wrap" tabindex="0" role="region" aria-label="Symptoms and fixes">
       <table class="docs-table">
         <thead><tr><th scope="col">You see</th><th scope="col">Fix</th></tr></thead>
@@ -46,7 +47,7 @@ const rows = [
         </tbody>
       </table>
     </div>
-    <h3>Known limitations</h3>
+    <DocsHeading level={3} id="known-limitations">Known limitations</DocsHeading>
     <ul>
       <li>One job at a time per runner; use one data directory per repository.</li>
       <li>Linux and WSL2 only. Tested end to end on WSL2 with Docker Desktop (amd64); native Linux and arm64 are built but not yet tested.</li>

@@ -1,5 +1,6 @@
 ---
 import DocsShell from '../../components/DocsShell.astro'
+import DocsHeading from '../../components/DocsHeading.astro'
 
 const commands = [
   ['ownci version [--json]', 'OwnCI version, commit, date, and the runner version when set up.'],
@@ -18,7 +19,7 @@ const commands = [
   description="Every OwnCI command and its flags. Global flags: --data-dir and -v/--verbose."
 >
   <section class="docs-section" id="commands">
-    <h2>Reference</h2>
+    <DocsHeading level={2} id="commands">Reference</DocsHeading>
     <div class="table-wrap" tabindex="0" role="region" aria-label="Command reference">
       <table class="docs-table">
         <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
@@ -29,7 +30,7 @@ const commands = [
         </tbody>
       </table>
     </div>
-    <h3>Global flags</h3>
+    <DocsHeading level={3} id="global-flags">Global flags</DocsHeading>
     <ul>
       <li><code>--data-dir</code>: where OwnCI keeps its runner and state. Without it: <code>$OWNCI_DATA_DIR</code>, then <code>$XDG_DATA_HOME/ownci</code>, then <code>~/.local/share/ownci</code>.</li>
       <li><code>-v</code>, <code>--verbose</code>: more detail in OwnCI’s output.</li>

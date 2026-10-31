@@ -250,6 +250,90 @@ Things to know:
 - A PR that changes CI is tested with `main`'s workflow; the change applies once it is merged,
   and then reaches every developer's machine. Review workflow changes like code.
 
+### Run LLM checks on the author's own tokens
+
+A job can run an AI coding CLI headless: Claude Code (`claude -p`), Codex (`codex exec`) or
+GitHub Copilot CLI (`copilot -p`). With the author routing above, an LLM review of a pull
+request runs on its author's machine and spends its author's tokens. This is a recipe, not an
+OwnCI feature: OwnCI does nothing LLM-specific, and its end-to-end tests do not cover it.
+
+Repository secrets are the wrong place for the key: they hold one shared key for everyone, and
+this workflow must not use secrets (see above). Keep each developer's key on their own machine
+and mount it into the job container instead.
+
+1. **Each developer, once: put the key in a file at a path the whole team agrees on.** The
+   path must be absolute and the same on every machine, so not under your home directory.
+
+   ```bash
+   sudo mkdir -p /etc/ownci
+   sudo install -m 600 -o "$USER" -g "$(id -gn)" /dev/null /etc/ownci/llm.env
+   echo 'ANTHROPIC_API_KEY=sk-ant-...' > /etc/ownci/llm.env
+   ```
+
+   Create it before the first job runs: if the file is missing, Docker creates an empty
+   directory in its place and the job fails reading it (`sudo rmdir /etc/ownci/llm.env`, then
+   create the file). To use a Claude subscription instead of an API key, `claude setup-token`
+   prints a long-lived token: store it as `CLAUDE_CODE_OAUTH_TOKEN=…`. For Codex and Copilot,
+   see their documentation for headless authentication. Check your provider's terms before
+   using a personal subscription in automation.
+
+2. **Run the check from `main` with `pull_request_target`**, routed to the author's runner as
+   in the previous section:
+
+   ```yaml
+   # .github/workflows/ai-review.yml, on main
+   on:
+     pull_request_target:
+       branches: [main]
+   permissions:
+     contents: read
+   jobs:
+     ai-review:
+       if: contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+       runs-on: [ownci, "dev-${{ github.event.pull_request.user.login }}"]   # the PR author's machine
+       container:
+         image: node:22
+         volumes:
+           - /etc/ownci/llm.env:/run/llm.env:ro     # the author's key, from their machine
+       steps:
+         - uses: actions/checkout@v4
+           with:
+             ref: ${{ github.event.pull_request.head.sha }}
+             fetch-depth: 0                           # for the diff against the base branch
+             persist-credentials: false
+         - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+         - run: npm install -g @anthropic-ai/claude-code@2.1.316
+         - run: |
+             set -a; . /run/llm.env; set +a
+             git diff "origin/${{ github.base_ref }}...HEAD" \
+               | claude -p "Review this diff for bugs. Be brief." >> "$GITHUB_STEP_SUMMARY"
+   ```
+
+   The review appears in the run's summary, which needs no extra permission. Don't give the
+   job `pull-requests: write` to post comments: the PR's code runs in the same job and would
+   get that token too. In container-runner mode, keep the `container:` line, because only a
+   job container can mount a file from your machine.
+
+Things to know:
+
+- **The check is advisory, not a gate.** It runs from the PR's checkout on the author's
+  machine, so the author controls the repository's prompts and skills (`.claude/`,
+  `CLAUDE.md`) and, in the end, the result. Use it to help authors, not to approve merges.
+- **The job can read the key.** So can the PR's code, and a prompt hidden in the diff can ask
+  the agent to leak it. Anyone with write access who pushes to someone else's PR branch runs
+  their code next to that author's key. Leave the agent's tools restricted: in `-p` mode Claude
+  Code refuses tools that need approval unless you allow them, so don't add
+  `--dangerously-skip-permissions`. Prefer a key with a spending limit.
+- **Claude Code is installed on every run.** The job container starts fresh, so nothing
+  installed on your machine is in it. To skip the install, build an image `FROM node:22` with
+  Claude Code installed, push it to a registry and use it as `image:`; each machine then
+  downloads it once.
+- **Your own Claude setup stays on your machine.** The job sees the repository's `.claude/` and
+  `CLAUDE.md` from the checkout and the key from the mounted file, not your `~/.claude` (login,
+  settings, personal skills).
+- **Every push spends tokens.** Limit the check with `paths:` filters, a label, or by diffing
+  only the files that matter. LLM output varies from run to run.
+
 ### Several repositories
 
 One data directory holds one runner for one repository. For a second repository, give it

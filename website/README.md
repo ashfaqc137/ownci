@@ -22,6 +22,7 @@ Node 22 or newer (see `.nvmrc` and `engines`). Dependencies are pinned to exact 
 | `src/pages/` | `index` (why OwnCI), `how-it-works`, `security`, `docs/*`, `404` |
 | `src/layouts/BaseLayout.astro` | Header, nav, footer, font imports |
 | `src/components/DocsShell.astro` | Docs sidebar layout; add new docs pages to its `groups` |
+| `src/components/DocsHeading.astro` | Docs `h2`/`h3` with a `#` permalink; use it for every heading in `src/pages/docs/`. An `h2` takes its `<section>`'s id, an `h3` gets its own |
 | `src/components/Code.astro` | Code block with a copy button; pass snippets as a string prop (write `${{` as `\${{` in template literals) |
 | `src/lib/paths.ts` | `href()` and `routePath()`: every internal link goes through `href('/docs/')` so it carries the `/ownci` base |
 | `src/styles/sparshlabs.css` | Shared sparshlabs theme: tokens, header, footer, sections, docs, code. **A synced copy, don't edit it here** |
