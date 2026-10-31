@@ -437,6 +437,17 @@ eval "$(go run ./tools/fakegh --print-env)"
 
 The real end-to-end check against GitHub is [`docs/e2e.md`](docs/e2e.md).
 
+Pull requests get a second check, `ownci` ([`.github/workflows/ownci.yml`](.github/workflows/ownci.yml)):
+`make check` again, on OwnCI itself, on the author's own runner built from the pull request's head
+commit. After each push to a pull request branch:
+
+```bash
+make dogfood   # builds HEAD, registers it on ashfaqc137/ownci as dev-<you>,build-<HEAD>, starts it
+```
+
+The check waits in the queue until that runner is listening. It runs only for pull requests from
+the owner, members and collaborators; [`tools/dogfood.sh`](tools/dogfood.sh) has the details.
+
 ## License
 
 [MIT](LICENSE).

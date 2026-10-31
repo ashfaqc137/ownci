@@ -2,7 +2,7 @@ LDFLAGS := -X github.com/ashfaqc137/ownci/internal/buildinfo.Version=$(shell git
 	-X github.com/ashfaqc137/ownci/internal/buildinfo.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none) \
 	-X github.com/ashfaqc137/ownci/internal/buildinfo.Date=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: build build-dev test vet fmt fmtcheck check clean release
+.PHONY: build build-dev test vet fmt fmtcheck check clean release dogfood
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ownci ./cmd/ownci
@@ -33,3 +33,7 @@ clean:
 # make release VERSION=v0.1.0 [ALLOW_DIRTY=1]: archives + SHA256SUMS in dist/.
 release:
 	VERSION='$(VERSION)' ALLOW_DIRTY='$(ALLOW_DIRTY)' ./tools/release.sh
+
+# make dogfood: serve this repository's ownci check from a runner built from HEAD (tools/dogfood.sh).
+dogfood:
+	./tools/dogfood.sh
